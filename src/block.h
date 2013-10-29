@@ -33,16 +33,77 @@
 
 #define BLOCK_SIZE 512
 
-/* block number type is defined here for portability, if you're expecting to have more than 2TB
-   with a 512 byte block size you need to use 64bit block numbers */
+/**
+ * \typedef typedef uint32_t blockno_t
+ *
+ * Block number type is defined here for portability, if you're expecting to have more than 2TB
+ * with a 512 byte block size you need to use 64bit block numbers.  Default is 32 bit for speed
+ * on 32 bit micros.
+ **/
 typedef uint32_t blockno_t;
 #define MAX_BLOCK 0xFFFFFFFF
 
+/**
+ * \brief Any setup needed by the driver.
+ * 
+ * This function must be called before any others, this can be used to intialise any persistant
+ * structures or counters and can be used to start the hardware driver (e.g. power up the SD card
+ * and read the card geometry.)
+ * 
+ * \return 0 on success, anything else to indicate error.
+ **/
 int block_init();
-int block_read(blockno_t, void *);
-int block_write(blockno_t, void *);
+
+/**
+ * \brief Read the specified block number into memory at the given address.
+ * 
+ * Reads a contiguous block of #BLOCK_SIZE bytes from the medium into a pre-allocated area of
+ * memory passed to the function by the caller.
+ * 
+ * \param block is the block number, this is block * #BLOCK_SIZE bytes from the start of the volume
+ * \param buf is a pointer to #BLOCK_SIZE bytes already allocated in memory
+ * \return 0 on success, anything else may indicate an error.
+ **/
+int block_read(blockno_t block, void *buf);
+
+/**
+ * \brief Write a block from memory to the volume at the specified block address.
+ * 
+ * Writes #BLOCK_SIZE bytes from memory at the location indicated to the disk block indicated in
+ * the call.
+ * 
+ * \param block is the block number to write to.
+ * \param buf is a pointer to #BLOCK_SIZE bytes to be written to the volume
+ * \return 0 on success, anything else to indicate an error.
+ **/
+int block_write(blockno_t block, void *buf);
+
+/**
+ * \brief Get the size of the volume which contains the filesystem in blocks.
+ * 
+ * Returns the total number of blocks in the device containing the filesystem.  Note this is the
+ * device not the partition so it will return for example the total number of blocks on an SD
+ * card.
+ * 
+ * \return Number of blocks in total on the disk.
+ **/
 int block_get_volume_size();
+
+/**
+ * \brief Returns the compiled value of #BLOCK_SIZE
+ * 
+ * \return The value of #BLOCK_SIZE
+ **/
 int block_get_block_size();
+
+/**
+ * \brief Find out if the volume is mounted as read only.
+ * 
+ * This depends on the driver implementation, for example full size SD/MMC cards have a read only
+ * switch that can be read by hardware, otherwise it could be marked as read only at mount.
+ * 
+ * \return non zero to indicate true (i.e. read-only) zero to indicate false (writeable).
+ **/
 int block_get_device_read_only();
 
 #endif /* ifndef BLOCK_H */
