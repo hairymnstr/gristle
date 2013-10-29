@@ -31,7 +31,7 @@
 #include <libopencm3/stm32/f1/rcc.h>
 #include <libopencm3/stm32/f1/gpio.h>
 #include "block_sd.h"
-#include "block.h"
+#include "../block.h"
 #include "config.h"
 
 SDCard card = {0, 0, 0, 0};

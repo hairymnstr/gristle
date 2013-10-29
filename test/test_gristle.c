@@ -31,11 +31,10 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
-#include "fat.h"
-#include "block.h"
-#include "block_pc.h"
-#include "partition.h"
-#include "mbr.h"
+#include "../src/gristle.h"
+#include "../src/block.h"
+#include "../src/block_drivers/block_pc.h"
+#include "../src/partition.h"
 
 /**************************************************************
  * Filesystem image structure:

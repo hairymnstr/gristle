@@ -35,8 +35,8 @@
 #include "dirent.h"
 #include <errno.h>
 #include "block.h"
-#include "fat.h"
-#include "mbr.h"
+#include "partition.h"
+#include "gristle.h"
 
 /**
  * global variable structures.

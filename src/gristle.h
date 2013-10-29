@@ -26,8 +26,8 @@
  * This file is part of the Gristle FAT16/32 compatible filesystem driver.
  */
 
-#ifndef FAT_H
-#define FAT_H 1
+#ifndef GRISTLE_H
+#define GRISTLE_H 1
 
 #include <stdint.h>
 #include <sys/stat.h>
@@ -185,4 +185,4 @@ int fat_fstat(int, struct stat *, int *);
 int fat_lseek(int, int, int, int *);
 int fat_get_next_dirent(int, struct dirent *);
 
-#endif
+#endif /* ifndef GRISTLE_H */

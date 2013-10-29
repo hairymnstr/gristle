@@ -31,7 +31,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "hash.h"
-#include "block.h"
+#include "../block.h"
 #include "block_pc.h"
 
 uint64_t block_fs_size=0;
