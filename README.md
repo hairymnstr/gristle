@@ -40,4 +40,4 @@ which is the basis of the writing routines, but this is still sparse.
 Author
 ------
 
-Gristle is written by [Nathan Dumont](nathan@nathandumont.com).
+Gristle is written by Nathan Dumont <nathan@nathandumont.com>.
