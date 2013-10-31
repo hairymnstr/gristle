@@ -31,6 +31,12 @@
 #ifndef BLOCK_H
 #define BLOCK_H 1
 
+/**
+ * #BLOCK_SIZE is the number of bytes per logical block on the storage medium.  Only 512 has been
+ * tested but other sizes are theoretically possible.  This affects both the amount of data read
+ * and written in one block opperation and the addressing i.e. block index 2 is 2 * #BLOCK_SIZE
+ * bytes into the volume.
+ **/ 
 #define BLOCK_SIZE 512
 
 /**

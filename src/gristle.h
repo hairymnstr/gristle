@@ -177,8 +177,25 @@ typedef struct {
 // int sdfat_next_sector(int fd);
 
 int fat_mount(blockno_t start, blockno_t volume_size, uint8_t part_type_hint);
-int fat_open(const char *, int, int, int *);
-int fat_close(int, int *);
+
+/**
+ * \brief basic open a file function
+ * 
+ * Conforms to the IEEE standard open function with the addition of a return error number parameter.
+ * Will open a file according to the flags and mode using given name.  This function doesn't set
+ * the global errno parameter, it writes any error code to the integer pointer parameter.  This 
+ * makes the function potentially thread safe although it hasn't been fully tested.
+ * 
+ * \param name is the file path/name to be opened
+ * \param flags is a bitwise OR of flags from fcntl.h including read/write/create/append etc.
+ * \param mode is the permissions setting for creating the file, largely ignored on FAT
+ * \param errno if there is an error the error code will be written to the integer pointed to by
+ * errno
+ * \returns -1 on error or a file number for the opened file.
+ **/
+int fat_open(const char *name, int flags, int mode, int *errno);
+
+int fat_close(int fd, int *errno);
 int fat_read(int, void *, size_t, int *);
 int fat_write(int, const void *, size_t, int *);
 int fat_fstat(int, struct stat *, int *);
