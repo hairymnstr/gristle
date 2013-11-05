@@ -40,7 +40,7 @@ int block_ro;
 
 int block_init() {
   FILE *block_fp;
-  if(!(block_fp = fopen("partitioned.img", "rb"))) {
+  if(!(block_fp = fopen("testext.img", "rb"))) {
     return -1;
   }
   fseek(block_fp, 0, SEEK_END);
