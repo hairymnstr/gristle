@@ -46,25 +46,45 @@ int ext2_lookup_path(int fd, const char *path, int *rerrno) {
 
 int ext2_select_inode(int fd, int inode, struct ext2context *context) {
   struct inode *in;
+  struct block_group_descriptor *block_table;
+  uint32_t inode_block;
   uint32_t block_group = (inode - 1) / context->superblock.s_inodes_per_group;
   uint32_t inode_index = (inode - 1) % context->superblock.s_inodes_per_group;
   
-  blockno_t location = block_group * context->superblock.s_blocks_per_group;
-  location += 4;
-  location = 35;
-  printf("location: %u\n", location);
-  location *= (1 << (context->superblock.s_log_block_size + 1));
+  // now load the block group descriptor for that block group
+  uint32_t bg_block = 1;
+  if(context->superblock.s_log_block_size == 0) {
+    bg_block++;
+  }
   
-  location += (inode_index >> 2);
+  bg_block <<= (context->superblock.s_log_block_size + 1);
   
-  printf("location: %u\n", location);
+  bg_block += ((block_group * 32) / 512);
   
-  block_read(location + context->part_start, context->sysbuf);
+  block_read(bg_block + context->part_start, context->sysbuf);
   
-  printf("location: %u\n", location + context->part_start);
+  block_table = (struct block_group_descriptor *)&context->sysbuf[(block_group * 32) & 0x1ff];
   
-  in = (struct inode *)(&context->sysbuf[128 * (inode_index & 3)]);
+  inode_block = block_table->bg_inode_table;
   
+  printf("Inode block %d\r\n", inode_block);
+  
+  inode_block <<= (context->superblock.s_log_block_size + 1);
+  
+  inode_block += (inode_index >> 2);
+  printf("loc %d\r\n", inode_block);
+  
+  block_read(inode_block + context->part_start, context->sysbuf);
+  
+  int i, j;
+  for(i=0;i<16;i++) {
+    for(j=0;j<32;j++) {
+      printf("%02X ", context->sysbuf[i * 32 + j]);
+    }
+    printf("\n");
+  }
+  printf("inode index & 3 = %d\n", inode_index & 3);
+  in = (struct inode *)(&context->sysbuf[context->superblock.s_inode_size * (inode_index & 3)]);
   printf("i_mode %u\n", in->i_mode);
   printf("i_uid %u\n", in->i_uid);
   printf("i_size %u\n", in->i_size);
@@ -72,6 +92,19 @@ int ext2_select_inode(int fd, int inode, struct ext2context *context) {
   printf("i_ctime %u\n", in->i_ctime);
   printf("i_mtime %u\n", in->i_mtime);
   printf("i_dtime %u\n", in->i_dtime);
+  
+  for(i=0;i<15;i++) {
+    printf("block %d: %d\n", i, in->i_block[i]);
+  }
+  
+  block_read(547 * 8, context->sysbuf);
+  for(i=0;i<16;i++) {
+    for(j=0;j<32;j++) {
+      printf("%02X ", context->sysbuf[i * 32 + j]);
+    }
+    printf("\n");
+  }
+  return 0;
 }
 
 int ext2_next_sector(int fd, struct ext2context *context) {
@@ -155,10 +188,8 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
     printf("bg_pad %u\n", block_table->bg_pad);
   }
   
-  for(i=1;i<30;i++) {
-    printf("-- inode %d --------------\n", i);
-    ext2_select_inode(0, i, (*context));
-  }
+  ext2_select_inode(0, EXT2_ROOT_INO, (*context));
+
 }
 
 int ext2_open(const char *name, int flags, int mode, int *rerrno, struct ext2context *context) {
