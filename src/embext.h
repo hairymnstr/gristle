@@ -94,6 +94,30 @@ struct ext2context {
   blockno_t part_start;
   struct superblock superblock;
   uint8_t sysbuf[512];
+  uint32_t superblock_block;
+  uint32_t inode_number;
+  uint32_t inode_dirty;
+  struct inode inodebuf;
+  uint32_t inode_mask;
+  uint16_t block_mask;
+  uint16_t same_block;
+};
+
+struct ext2_dirent {
+  uint32_t inode;
+  uint16_t rec_len;
+  uint8_t name_len;
+  uint8_t file_type;
+  char name;
+};
+
+struct file_ent {
+  uint32_t inode;
+  uint32_t block;
+  uint32_t sector;
+  uint32_t sectors_remaining;
+  uint32_t block_index;
+  uint8_t buffer[512];
 };
 
 int ext2_mount(blockno_t part_start, blockno_t volume_size, uint8_t filesystem_hint, struct ext2context **context);

@@ -44,19 +44,25 @@ int ext2_lookup_path(int fd, const char *path, int *rerrno) {
   return 0;
 }
 
-int ext2_select_inode(int fd, int inode, struct ext2context *context) {
-  struct inode *in;
+int ext2_flush_inode(struct ext2context *context) {
+  
+  return 0;
+}
+
+int ext2_select_inode(int inode, struct ext2context *context) {
   struct block_group_descriptor *block_table;
   uint32_t inode_block;
   uint32_t block_group = (inode - 1) / context->superblock.s_inodes_per_group;
   uint32_t inode_index = (inode - 1) % context->superblock.s_inodes_per_group;
-  
   // now load the block group descriptor for that block group
-  uint32_t bg_block = 1;
-  if(context->superblock.s_log_block_size == 0) {
-    bg_block++;
-  }
+  uint32_t bg_block = context->superblock_block + 1;
   
+  if(inode == context->inode_number) {
+    return 0;
+  }
+  if(context->inode_dirty) {
+    ext2_flush_inode(context);
+  }
   bg_block <<= (context->superblock.s_log_block_size + 1);
   
   bg_block += ((block_group * 32) / 512);
@@ -67,48 +73,50 @@ int ext2_select_inode(int fd, int inode, struct ext2context *context) {
   
   inode_block = block_table->bg_inode_table;
   
-  printf("Inode block %d\r\n", inode_block);
-  
   inode_block <<= (context->superblock.s_log_block_size + 1);
   
   inode_block += (inode_index >> 2);
-  printf("loc %d\r\n", inode_block);
   
   block_read(inode_block + context->part_start, context->sysbuf);
   
-  int i, j;
-  for(i=0;i<16;i++) {
-    for(j=0;j<32;j++) {
-      printf("%02X ", context->sysbuf[i * 32 + j]);
-    }
-    printf("\n");
-  }
-  printf("inode index & 3 = %d\n", inode_index & 3);
-  in = (struct inode *)(&context->sysbuf[context->superblock.s_inode_size * (inode_index & 3)]);
-  printf("i_mode %u\n", in->i_mode);
-  printf("i_uid %u\n", in->i_uid);
-  printf("i_size %u\n", in->i_size);
-  printf("i_atime %u\n", in->i_atime);
-  printf("i_ctime %u\n", in->i_ctime);
-  printf("i_mtime %u\n", in->i_mtime);
-  printf("i_dtime %u\n", in->i_dtime);
+  memcpy(&context->inodebuf, &context->sysbuf[context->superblock.s_inode_size * (inode_index & context->inode_mask)], sizeof(struct inode));
   
-  for(i=0;i<15;i++) {
-    printf("block %d: %d\n", i, in->i_block[i]);
-  }
+  context->inode_number = inode;
+  context->inode_dirty = 0;
+  return 0;
+}
+
+int ext2_select_block(uint32_t block, struct file_ent *fe, struct ext2context *context) {
+  fe->block = block;
+  fe->sectors_remaining = ((1 << (10 + context->superblock.s_log_block_size)) / block_get_block_size()) - 1;
+  fe->sector = block * (1 << (context->superblock.s_log_block_size + 1));
+  return block_read(fe->sector, fe->buffer);
+}
+
+int ext2_next_block(struct file_ent *fe, struct ext2context *context) {
+  ext2_select_inode(fe->inode, context);
   
-  block_read(547 * 8, context->sysbuf);
-  for(i=0;i<16;i++) {
-    for(j=0;j<32;j++) {
-      printf("%02X ", context->sysbuf[i * 32 + j]);
+  if(fe->block_index < 11) {
+    fe->block_index++;
+    if(context->inodebuf.i_block[fe->block_index] > 0) {
+      return ext2_select_block(fe->block_index, fe, context);
+    } else {
+      return 1;
     }
-    printf("\n");
+  } else {
+    printf("Oh dear, indirect block :(\n");
+    return 1;
   }
   return 0;
 }
 
-int ext2_next_sector(int fd, struct ext2context *context) {
-  
+int ext2_next_sector(struct file_ent *fe, struct ext2context *context) {
+  if(fe->sectors_remaining > 0) {
+    block_read(++fe->sector, fe->buffer);
+    fe->sectors_remaining--;
+    return 0;
+  }
+  return ext2_next_block(fe, context);
 }
 
 /**
@@ -122,6 +130,17 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
   block_read(part_start+2, (*context)->sysbuf);
   memcpy(&(*context)->superblock, (*context)->sysbuf, sizeof(struct superblock));
   
+  (*context)->block_mask = (1 << ((*context)->superblock.s_log_block_size + 1)) - 1;
+  (*context)->same_block = part_start & (*context)->block_mask;
+  (*context)->inode_number = 0;
+  (*context)->inode_dirty = 0;
+  (*context)->inode_mask = (block_get_block_size() / (*context)->superblock.s_inode_size) - 1;
+  
+  if((*context)->superblock.s_log_block_size == 0) {
+    (*context)->superblock_block = 1;
+  } else {
+    (*context)->superblock_block = 0;
+  }
   printf("s_inodes_count %u\n", (*context)->superblock.s_inodes_count);
   printf("s_blocks_count %u\n", (*context)->superblock.s_blocks_count);
   printf("s_r_blocks_count %u\n", (*context)->superblock.s_r_blocks_count);
@@ -188,8 +207,38 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
     printf("bg_pad %u\n", block_table->bg_pad);
   }
   
-  ext2_select_inode(0, EXT2_ROOT_INO, (*context));
-
+  ext2_select_inode(EXT2_ROOT_INO, (*context));
+  
+  struct file_ent fe;
+  fe.inode = EXT2_ROOT_INO;
+  fe.block_index = 0;
+  ext2_select_block((*context)->inodebuf.i_block[0], &fe, (*context));
+  
+  char nm[256];
+  int ofs = 0;
+  struct ext2_dirent *de;
+  while(ofs < 512) {
+    de = (struct ext2_dirent *)(&fe.buffer[ofs]);
+    if(de->inode == 0) {
+      break;
+    }
+    memcpy(nm, &de->name, de->name_len);
+    nm[de->name_len] = 0;
+    printf("%s %d\n", nm, de->inode);
+    ofs += de->rec_len;
+  }
+//   int j;
+//   do {
+//     for(i=0;i<16;i++) {
+//       for(j=0;j<32;j++) {
+//         printf("%02X ", fe.buffer[i*32 + j]);
+//       }
+//       printf("\n");
+//     }
+//     printf("-------------------------------------\n");
+//   } while(!ext2_next_sector(&fe, (*context)));
+//   
+//   
 }
 
 int ext2_open(const char *name, int flags, int mode, int *rerrno, struct ext2context *context) {
