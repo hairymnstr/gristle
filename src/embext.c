@@ -39,17 +39,18 @@
 #include "partition.h"
 #include "embext.h"
 
-int ext2_lookup_path(int fd, const char *path, int *rerrno) {
-
-  return 0;
-}
-
-int ext2_flush_inode(struct ext2context *context) {
+int ext2_flush_inode(struct file_ent *fe, struct ext2context *context) {
   
   return 0;
 }
 
-int ext2_select_inode(int inode, struct ext2context *context) {
+int ext2_update_atime(struct file_ent *fe, struct ext2context *context) {
+  fe->inode.i_atime = time(NULL);
+  fe->inode_dirty = 1;
+  return 0;
+}
+
+int ext2_open_inode(struct file_ent *fe, int inode, struct ext2context *context) {
   struct block_group_descriptor *block_table;
   uint32_t inode_block;
   uint32_t block_group = (inode - 1) / context->superblock.s_inodes_per_group;
@@ -57,11 +58,11 @@ int ext2_select_inode(int inode, struct ext2context *context) {
   // now load the block group descriptor for that block group
   uint32_t bg_block = context->superblock_block + 1;
   
-  if(inode == context->inode_number) {
+  if(inode == fe->inode_number) {
     return 0;
   }
-  if(context->inode_dirty) {
-    ext2_flush_inode(context);
+  if(fe->inode_dirty) {
+    ext2_flush_inode(fe, context);
   }
   bg_block <<= (context->superblock.s_log_block_size + 1);
   
@@ -79,10 +80,43 @@ int ext2_select_inode(int inode, struct ext2context *context) {
   
   block_read(inode_block + context->part_start, context->sysbuf);
   
-  memcpy(&context->inodebuf, &context->sysbuf[context->superblock.s_inode_size * (inode_index & context->inode_mask)], sizeof(struct inode));
+  memcpy(&fe->inode, &context->sysbuf[context->superblock.s_inode_size * (inode_index & context->inode_mask)], sizeof(struct inode));
   
-  context->inode_number = inode;
-  context->inode_dirty = 0;
+  fe->inode_number = inode;
+  fe->inode_dirty = 0;
+  return 0;
+}
+
+int ext2_lookup_path(struct file_ent *fe, const char *path, int *rerrno, struct ext2context *context) {
+  char local_path[MAX_PATH_LEN];
+  char *elements[MAX_PATH_LEVELS];
+  int levels = 0;
+  uint32_t ino = EXT2_ROOT_INO;
+  struct dirent *de;
+  int i;
+  
+  strncpy(local_path, path, sizeof(local_path));
+  local_path[MAX_PATH_LEN-1] = 0;
+  
+  elements[levels++] = strtok(local_path, "/");
+  while((elements[levels++] = strtok(NULL, "/"))) {;}
+  levels--;
+  
+  for(i=0;i<levels;i++) {
+    ext2_open_inode(fe, ino, context);
+    de = ext2_readdir(fe, rerrno, context);
+    while(de != NULL) {
+      if(strcmp(de->d_name, elements[i]) == 0) {
+        break;
+      }
+    }
+    if(de == NULL) {
+      *rerrno = ENOENT;
+      return -1;
+    }
+    ino = de->d_ino;
+  }
+
   return 0;
 }
 
@@ -94,12 +128,11 @@ int ext2_select_block(uint32_t block, struct file_ent *fe, struct ext2context *c
 }
 
 int ext2_next_block(struct file_ent *fe, struct ext2context *context) {
-  ext2_select_inode(fe->inode, context);
   
-  if(fe->block_index < 11) {
-    fe->block_index++;
-    if(context->inodebuf.i_block[fe->block_index] > 0) {
-      return ext2_select_block(fe->block_index, fe, context);
+  if(fe->block_index[0] < 11) {
+    fe->block_index[0]++;
+    if(fe->inode.i_block[fe->block_index[0]] > 0) {
+      return ext2_select_block(fe->block_index[0], fe, context);
     } else {
       return 1;
     }
@@ -130,10 +163,10 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
   block_read(part_start+2, (*context)->sysbuf);
   memcpy(&(*context)->superblock, (*context)->sysbuf, sizeof(struct superblock));
   
-  (*context)->block_mask = (1 << ((*context)->superblock.s_log_block_size + 1)) - 1;
-  (*context)->same_block = part_start & (*context)->block_mask;
-  (*context)->inode_number = 0;
-  (*context)->inode_dirty = 0;
+//   (*context)->block_mask = (1 << ((*context)->superblock.s_log_block_size + 1)) - 1;
+//   (*context)->same_block = part_start & (*context)->block_mask;
+//   (*context)->inode_number = 0;
+//   (*context)->inode_dirty = 0;
   (*context)->inode_mask = (block_get_block_size() / (*context)->superblock.s_inode_size) - 1;
   
   if((*context)->superblock.s_log_block_size == 0) {
@@ -207,26 +240,26 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
     printf("bg_pad %u\n", block_table->bg_pad);
   }
   
-  ext2_select_inode(EXT2_ROOT_INO, (*context));
-  
-  struct file_ent fe;
-  fe.inode = EXT2_ROOT_INO;
-  fe.block_index = 0;
-  ext2_select_block((*context)->inodebuf.i_block[0], &fe, (*context));
-  
-  char nm[256];
-  int ofs = 0;
-  struct ext2_dirent *de;
-  while(ofs < 512) {
-    de = (struct ext2_dirent *)(&fe.buffer[ofs]);
-    if(de->inode == 0) {
-      break;
-    }
-    memcpy(nm, &de->name, de->name_len);
-    nm[de->name_len] = 0;
-    printf("%s %d\n", nm, de->inode);
-    ofs += de->rec_len;
-  }
+//   ext2_select_inode(EXT2_ROOT_INO, (*context));
+//   
+//   struct file_ent fe;
+//   fe.inode = EXT2_ROOT_INO;
+//   fe.block_index = 0;
+//   ext2_select_block((*context)->inodebuf.i_block[0], &fe, (*context));
+//   
+//   char nm[256];
+//   int ofs = 0;
+//   struct ext2_dirent *de;
+//   while(ofs < 512) {
+//     de = (struct ext2_dirent *)(&fe.buffer[ofs]);
+//     if(de->inode == 0) {
+//       break;
+//     }
+//     memcpy(nm, &de->name, de->name_len);
+//     nm[de->name_len] = 0;
+//     printf("%s %d\n", nm, de->inode);
+//     ofs += de->rec_len;
+//   }
 //   int j;
 //   do {
 //     for(i=0;i<16;i++) {
@@ -241,18 +274,16 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
 //   
 }
 
-int ext2_open(const char *name, int flags, int mode, int *rerrno, struct ext2context *context) {
+struct file_ent *ext2_open(const char *name, int flags, int mode, int *rerrno, struct ext2context *context) {
 //   int i;
-//   int8_t fd;
-//   (*rerrno) = 0;
-//   
-//   fd = fat_get_next_file();
-//   if(fd < 0) {
-//     (*rerrno) = ENFILE;
-//     return -1;   /* too many open files */
+//   struct file_ent *fe = (struct file_ent *)malloc(sizeof(struct file_ent));
+//   if(fe == NULL) {
+//     (*rerrno) = ENOMEM;
+//     return NULL;
 //   }
+//   (*rerrno) = 0;
 // 
-//   i = fat_lookup_path(fd, name, rerrno);
+//   i = ext2_lookup_path(fe, name, rerrno);
 //   if((flags & O_RDWR)) {
 //     file_num[fd].flags |= (FAT_FLAG_READ | FAT_FLAG_WRITE);
 //   } else {
@@ -388,36 +419,36 @@ int ext2_close(int fd, int *rerrno, struct ext2context *context) {
 //   return 0;
 }
 
-int ext2_read(int fd, void *buffer, size_t count, int *rerrno, struct ext2context *context) {
-//   uint32_t i=0;
-//   uint8_t *bt = (uint8_t *)buffer;
-//   /* make sure this is an open file and it can be read */
-//   (*rerrno) = 0;
-//   if(fd >= MAX_OPEN_FILES) {
-//     (*rerrno) = EBADF;
-//     return -1;
-//   }
-//   if((~file_num[fd].flags) & (FAT_FLAG_OPEN | FAT_FLAG_READ)) {
-//     (*rerrno) = EBADF;
-//     return -1;
-//   }
-//   
-//   /* copy some bytes to the buffer requested */
-//   while(i < count) {
-//     if(((file_num[fd].cursor + file_num[fd].file_sector * 512)) >= file_num[fd].size) {
-//       break;   /* end of file */
-//     }
-//     *bt++ = *(uint8_t *)(file_num[fd].buffer + file_num[fd].cursor);
-//     file_num[fd].cursor++;
-//     if(file_num[fd].cursor == 512) {
-//       fat_next_sector(fd);
-//     }
-//     i++;
-//   }
-//   if(i > 0) {
-//     fat_update_atime(fd);
-//   }
-//   return i;
+int ext2_read(struct file_ent *fe, void *buffer, size_t count, int *rerrno, struct ext2context *context) {
+  uint32_t i=0;
+  uint8_t *bt = (uint8_t *)buffer;
+  /* make sure this is an open file and it can be read */
+  (*rerrno) = 0;
+  if(fe == NULL) {
+    (*rerrno) = EBADF;
+    return -1;
+  }
+  if((~fe->flags) & (EXT2_FLAG_OPEN | EXT2_FLAG_READ)) {
+    (*rerrno) = EBADF;
+    return -1;
+  }
+  
+  /* copy some bytes to the buffer requested */
+  while(i < count) {
+    if(((fe->cursor + fe->file_sector * 512)) >= fe->inode.i_size) {
+      break;   /* end of file */
+    }
+    *bt++ = *(uint8_t *)(fe->buffer + fe->cursor);
+    fe->cursor++;
+    if(fe->cursor == block_get_block_size()) {
+      ext2_next_sector(fe, context);
+    }
+    i++;
+  }
+  if(i > 0) {
+    ext2_update_atime(fe, context);
+  }
+  return i;
 }
 
 int ext2_write(int fd, const void *buffer, size_t count, int *rerrno, struct ext2context *context) {
@@ -584,40 +615,19 @@ int ext2_lseek(int fd, int ptr, int dir, int *rerrno, struct ext2context *contex
 //   return new_pos;
 }
 
-int ext2_get_next_dirent(int fd, struct dirent *out_de) {
-//   direntS *de;
-// //   int i,j;
-// //   iprintf("%d\r\n", file_num[fd].cursor);
-//   de = (direntS *)(file_num[fd].buffer + file_num[fd].cursor);
-// 
-//   /* first check the current entry isn't the end of the folder */
-//   if(de->filename[0] == 0) {
-//     return -1;
-//   }
-//   /* now keep looping past LFN entries until a valid one or the end of dir is found */
-//   while(1) {
-//     /* otherwise look for the next entry */
-// //     iprintf("looping %d\r\n", file_num[fd].cursor);
-//     if(file_num[fd].cursor + 32 == 512) {
-//       if(fat_next_sector(fd) == -1) {
-//         return -1;  /* there are no more sectors allocated to this directory */
-//       }
-//     } else {
-//       file_num[fd].cursor += 32;
-//     }
-//     de = (direntS *)(file_num[fd].buffer + file_num[fd].cursor);
-//     if(de->filename[0] == 0) {
-//       return -1;
-//     }
-//     if(!((de->attributes == 0x0F) || (de->attributes & FAT_ATT_VOL))) {
-//       /* if it's not an LFN and not a volume label it's a real file. */
-//       fatname_to_str(out_de->d_name, de->filename);
-//       if(fatfs.type == PART_TYPE_FAT16) {
-//         out_de->d_ino = de->first_cluster;
-//       } else {
-//         out_de->d_ino = de->first_cluster + (de->high_first_cluster << 16);
-//       }
-//       return 0;
-//     }
-//   }
+struct dirent *ext2_readdir(struct file_ent *fe, int *rerrno, struct ext2context *context) {
+  uint16_t rec_len;
+  uint8_t name_len;
+  uint8_t file_type;
+  static struct dirent de;
+  
+  ext2_read(fe, &de.d_ino, 4, rerrno, context);
+  ext2_read(fe, &rec_len, 2, rerrno, context);
+  ext2_read(fe, &name_len, 1, rerrno, context);
+  ext2_read(fe, &file_type, 1, rerrno, context);
+  
+  ext2_read(fe, de.d_name, name_len, rerrno, context);
+  
+  ext2_lseek(fe, rec_len - 8 - name_len, SEEK_CUR, rerrno, context);
+  return &de;
 }

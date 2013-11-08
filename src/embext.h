@@ -1,6 +1,9 @@
 #ifndef EMBEXT2_H
 #define EMBEXT2_H 1
 
+#define MAX_PATH_LEN 1024
+#define MAX_PATH_LEVELS 100
+
 // reserved inode definitions
 #define EXT2_BAD_INO 1
 #define EXT2_ROOT_INO 2
@@ -8,6 +11,13 @@
 #define EXT2_ACL_DATA_INO 4
 #define EXT2_BOOT_LOADER_INO 5
 #define EXT2_UNDEL_DIR_INO 6
+
+#define EXT2_FLAG_OPEN 1
+#define EXT2_FLAG_READ 2
+#define EXT2_FLAG_WRITE 4
+#define EXT2_FLAG_APPEND 8
+#define EXT2_FLAG_DIRTY 16
+#define EXT2_FLAG_FS_DIRTY 32
 
 struct superblock {
   uint32_t s_inodes_count;
@@ -95,12 +105,7 @@ struct ext2context {
   struct superblock superblock;
   uint8_t sysbuf[512];
   uint32_t superblock_block;
-  uint32_t inode_number;
-  uint32_t inode_dirty;
-  struct inode inodebuf;
   uint32_t inode_mask;
-  uint16_t block_mask;
-  uint16_t same_block;
 };
 
 struct ext2_dirent {
@@ -112,14 +117,21 @@ struct ext2_dirent {
 };
 
 struct file_ent {
-  uint32_t inode;
+  uint32_t flags;
+  uint32_t cursor;
+  uint32_t inode_number;
+  uint32_t inode_dirty;
   uint32_t block;
   uint32_t sector;
+  uint32_t file_sector;
   uint32_t sectors_remaining;
-  uint32_t block_index;
+  uint32_t block_index[3];
   uint8_t buffer[512];
+  struct inode inode;
 };
 
 int ext2_mount(blockno_t part_start, blockno_t volume_size, uint8_t filesystem_hint, struct ext2context **context);
+
+struct dirent *ext2_readdir(struct file_ent *fe, int *rerrno, struct ext2context *context);
 
 #endif /* ifndef EMBEXT2_H */
