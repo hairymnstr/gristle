@@ -36,6 +36,7 @@
 #include "dirent.h"
 
 #define MAX_OPEN_FILES 4
+#define MAX_PATH_LEN 256
 
 #define FIRST_DISC_FILENO 3 /* first real file (on disc) */
 
@@ -173,6 +174,8 @@ typedef struct {
 #define FAT_FLAG_DIRTY 16
 #define FAT_FLAG_FS_DIRTY 32
 
+#define FAT_INTERNAL_CALL 4242
+
 // int sdfat_lookup_path(int, const char *);
 // int sdfat_next_sector(int fd);
 
@@ -189,17 +192,19 @@ int fat_mount(blockno_t start, blockno_t volume_size, uint8_t part_type_hint);
  * \param name is the file path/name to be opened
  * \param flags is a bitwise OR of flags from fcntl.h including read/write/create/append etc.
  * \param mode is the permissions setting for creating the file, largely ignored on FAT
- * \param errno if there is an error the error code will be written to the integer pointed to by
+ * \param rerrno if there is an error the error code will be written to the integer pointed to by
  * errno
  * \returns -1 on error or a file number for the opened file.
  **/
-int fat_open(const char *name, int flags, int mode, int *errno);
+int fat_open(const char *name, int flags, int mode, int *rerrno);
 
-int fat_close(int fd, int *errno);
+int fat_close(int fd, int *rerrno);
 int fat_read(int, void *, size_t, int *);
 int fat_write(int, const void *, size_t, int *);
 int fat_fstat(int, struct stat *, int *);
 int fat_lseek(int, int, int, int *);
-int fat_get_next_dirent(int, struct dirent *);
+int fat_get_next_dirent(int, struct dirent *, int *rerrno);
 
+int fat_rmdir(const char *path, int *rerrno);
+int fat_mkdir(const char *path, int mode, int *rerrno);
 #endif /* ifndef GRISTLE_H */

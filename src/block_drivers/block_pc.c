@@ -40,7 +40,7 @@ int block_ro;
 
 int block_init() {
   FILE *block_fp;
-  if(!(block_fp = fopen("testext.img", "rb"))) {
+  if(!(block_fp = fopen("testfat.img", "rb"))) {
     return -1;
   }
   fseek(block_fp, 0, SEEK_END);
@@ -59,6 +59,7 @@ int block_init() {
 }
 
 int block_read(blockno_t block, void *buffer) {
+  printf("block read from %x\n", block * BLOCK_SIZE);
   /* we can't allow the file to grow (wouldn't happen with a physical volume) so need to check
      first because in rb+ file will grow if we seek past the end. */
   if((block+1) * BLOCK_SIZE - 1 > block_fs_size) {
@@ -74,6 +75,7 @@ int block_read(blockno_t block, void *buffer) {
 }
 
 int block_write(blockno_t block, void *buffer) {
+  printf("block write at %x\n", block * BLOCK_SIZE);
   if((block + 1) * BLOCK_SIZE - 1 > block_fs_size) {
     return -1;
   }

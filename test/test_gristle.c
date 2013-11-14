@@ -135,6 +135,8 @@ int test_open(int p) {
   return p;
 }
 
+extern struct fat_info fatfs;
+
 int main(int argc, char *argv[]) {
   int p = 0;
   int rerrno = 0;
@@ -175,6 +177,7 @@ int main(int argc, char *argv[]) {
     
   }
   
+  printf("Part type = %02X\n", fatfs.type);
   //   p = test_open(p);
 
   int fd;
@@ -191,24 +194,37 @@ int main(int argc, char *argv[]) {
 //     printf("errno=%d (%s)\n", rerrno, strerror(rerrno));
 //   }
   
-  printf("Open\n");
-  fd = fat_open("/newfile.png", O_WRONLY | O_CREAT, 0777, &rerrno);
-  printf("fd = %d, errno=%d (%s)\n", fd, rerrno, strerror(rerrno));
-  if(fd > -1) {
-    fp = fopen("gowrong_draft1.png", "rb");
-    fseek(fp, 0, SEEK_END);
-    len = ftell(fp);
-    d = malloc(len);
-    fseek(fp, 0, SEEK_SET);
-    fread(d, 1, len, fp);
-    fclose(fp);
-    printf("Write PNG\n");
-    fat_write(fd, d, len, &rerrno);
-    printf("errno=%d (%s)\n", rerrno, strerror(rerrno));
-    printf("Close\n");
-    fat_close(fd, &rerrno);
-    printf("errno=%d (%s)\n", rerrno, strerror(rerrno));
-  }
+//   printf("Open\n");
+//   fd = fat_open("/newfile.png", O_WRONLY | O_CREAT, 0777, &rerrno);
+//   printf("fd = %d, errno=%d (%s)\n", fd, rerrno, strerror(rerrno));
+//   if(fd > -1) {
+//     fp = fopen("gowrong_draft1.png", "rb");
+//     fseek(fp, 0, SEEK_END);
+//     len = ftell(fp);
+//     d = malloc(len);
+//     fseek(fp, 0, SEEK_SET);
+//     fread(d, 1, len, fp);
+//     fclose(fp);
+//     printf("Write PNG\n");
+//     fat_write(fd, d, len, &rerrno);
+//     printf("errno=%d (%s)\n", rerrno, strerror(rerrno));
+//     printf("Close\n");
+//     fat_close(fd, &rerrno);
+//     printf("errno=%d (%s)\n", rerrno, strerror(rerrno));
+//   }
+  
+  printf("errno = (%d) %s\n", rerrno, strerror(rerrno));
+  result = fat_mkdir("/foo", 0777, &rerrno);
+  printf("mkdir /foo: %d (%d) %s\n", result, rerrno, strerror(rerrno));
+  
+  result = fat_mkdir("/foo/bar", 0777, &rerrno);
+  printf("mkdir /foo/bar: %d (%d) %s\n", result, rerrno, strerror(rerrno));
+  
+  result = fat_rmdir("/foo/bar", &rerrno);
+  printf("rmdir /foo/bar: %d (%d) %s\n", result, rerrno, strerror(rerrno));
+  
+  result = fat_rmdir("/foo", &rerrno);
+  printf("rmdir /foo: %d (%d) %s\n", result, rerrno, strerror(rerrno));
   
   block_pc_snapshot_all("writenfs.img");
   exit(0);

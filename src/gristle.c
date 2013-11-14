@@ -296,6 +296,66 @@ int fatname_to_str(char *output, char *input) {
   return 0;   /* and return */
 }
 
+int str_to_fatname(char *url, char *dosname) {
+  int i = 0;
+  int j = 0;
+  char *name;
+  char *extension;
+  char buffer[32];
+  strncpy(buffer, url, 32);
+  buffer[31] = 0;
+  
+  name = strtok(buffer, ".");
+  extension = strtok(NULL, ".");
+  if(extension == NULL) {
+    extension = "";     // probably a directory
+  }
+  
+  if((strlen(name) > 8) || (strlen(extension) > 3)) {
+    while(i < 6) {
+      dosname[i] = doschar(url[j++]);
+      if(dosname[i] == 1) {
+        return 1;
+      } else if(dosname[i] == 0) {
+        return 0;
+      } else if(dosname[i] == '.') {
+        j--;
+        break;
+      }
+      i++;
+    }
+    dosname[i++] = '~';
+    dosname[i++] = '1';
+  } else {
+    while(i < 8) {
+      dosname[i] = doschar(url[j++]);
+      if(dosname[i] == 1) {
+        return 1;
+      } else if(dosname[i] == 0) {
+        return 0;
+      } else if(dosname[i] == '.') {
+        j--;
+        break;
+      }
+      i++;
+    }
+  }
+  dosname[i++] = '.';
+  j = 0;
+  while(j < 3) {
+    dosname[i++] = doschar(*extension++);
+    if(dosname[i-1] == 0) {
+      break;
+    } else if(dosname[i-1] == 1) {
+      return 1;
+    }
+    j++;
+  }
+  dosname[i] = 0;
+  printf("url: %s, dosname: %s\r\n", url, dosname);
+  return 0;
+}
+
 /* low level file-system operations */
 int fat_get_free_cluster() {
 #ifdef TRACE
@@ -1048,7 +1108,6 @@ int fat_mount(blockno_t part_start, blockno_t volume_size, uint8_t filesystem_hi
 int fat_open(const char *name, int flags, int mode, int *rerrno) {
   int i;
   int8_t fd;
-  (*rerrno) = 0;
   
 //   printf("fat_open(%s, %x)\n", name, flags);
   fd = fat_get_next_file();
@@ -1141,9 +1200,15 @@ int fat_open(const char *name, int flags, int mode, int *rerrno) {
         }
         if(file_num[fd].attributes & FAT_ATT_SUBDIR) {
           /* Tried to open a directory for writing */
-          file_num[fd].flags = 0;
-          (*rerrno) = EISDIR;
-          return -1;
+          /* Magic handshake */
+          if((*rerrno) == FAT_INTERNAL_CALL) {
+            file_num[fd].file_sector = 0;
+            return fd;
+          } else {
+            file_num[fd].flags = 0;
+            (*rerrno) = EISDIR;
+            return -1;
+          }
         }
         if(flags & O_TRUNC) {
           /* Need to truncate the file to zero length */
@@ -1245,7 +1310,7 @@ int fat_write(int fd, const void *buffer, size_t count, int *rerrno) {
 //     printf("Written %d bytes\n", i);
     if(((file_num[fd].cursor + file_num[fd].file_sector * 512)) == file_num[fd].size) {
       file_num[fd].size++;
-      file_num[fd].flags |= FAT_FLAG_DIRTY;
+      file_num[fd].flags |= FAT_FLAG_FS_DIRTY;
     }
     file_num[fd].buffer[file_num[fd].cursor] = *bt++;
     file_num[fd].cursor++;
@@ -1258,6 +1323,7 @@ int fat_write(int fd, const void *buffer, size_t count, int *rerrno) {
     i++;
   }
   if(i > 0) {
+    file_num[fd].flags |= FAT_FLAG_DIRTY;
     fat_update_mtime(fd);
   }
   return i;
@@ -1368,54 +1434,291 @@ int fat_lseek(int fd, int ptr, int dir, int *rerrno) {
   return new_pos;
 }
 
-int fat_get_next_dirent(int fd, struct dirent *out_de) {
-  direntS *de;
-//   int i,j;
-//   iprintf("%d\r\n", file_num[fd].cursor);
-  de = (direntS *)(file_num[fd].buffer + file_num[fd].cursor);
-
-  /* first check the current entry isn't the end of the folder */
-  if(de->filename[0] == 0) {
-    return -1;
-  }
-  /* now keep looping past LFN entries until a valid one or the end of dir is found */
+int fat_get_next_dirent(int fd, struct dirent *out_de, int *rerrno) {
+  direntS de;
+  
   while(1) {
-    /* otherwise look for the next entry */
-//     iprintf("looping %d\r\n", file_num[fd].cursor);
-    if(file_num[fd].cursor + 32 == 512) {
-      if(fat_next_sector(fd) == -1) {
-        return -1;  /* there are no more sectors allocated to this directory */
-      }
-    } else {
-      file_num[fd].cursor += 32;
-    }
-    de = (direntS *)(file_num[fd].buffer + file_num[fd].cursor);
-    if(de->filename[0] == 0) {
+    if(fat_read(fd, &de, sizeof(direntS), rerrno) == -1) {
       return -1;
     }
-    if(!((de->attributes == 0x0F) || (de->attributes & FAT_ATT_VOL))) {
-      /* if it's not an LFN and not a volume label it's a real file. */
-//       iprintf("fatname to str\r\n");
-//       for(i=0;i<4;i++) {
-//         for(j=0;j<8;j++) {
-//           iprintf("%02X ", file_num[fd].buffer[file_num[fd].cursor + i * 8 + j]);
-//         }
-//         iprintf("\r\n");
-//       }
-//       iprintf("%d\r\n", de->filename[0]);
-//       for(i=0;i<12;i++) {
-//         iprintf("%02X ", de->filename[i]);
-//       }
-      fatname_to_str(out_de->d_name, de->filename);
-//       iprintf("\r\n");
-//       iprintf("%s\r\n", de->filename);
-//       iprintf("%s\r\n", out_de->d_name);
+    if(de.filename[0] == 0) {
+      // end of the directory
+      *rerrno = 0;
+      return -1;
+    }
+    if(!((de.attributes == 0xf) || (de.attributes & FAT_ATT_VOL) || (de.filename[0] == (char)0xe5))) {
+      // not an LFN, volume label or deleted entry
+      fatname_to_str(out_de->d_name, de.filename);
+      
       if(fatfs.type == PART_TYPE_FAT16) {
-        out_de->d_ino = de->first_cluster;
+        out_de->d_ino = de.first_cluster;
       } else {
-        out_de->d_ino = de->first_cluster + (de->high_first_cluster << 16);
+        out_de->d_ino = de.first_cluster + (de.high_first_cluster << 16);
       }
       return 0;
     }
   }
+}
+// //   int i,j;
+// //   iprintf("%d\r\n", file_num[fd].cursor);
+//   de = (direntS *)(file_num[fd].buffer + file_num[fd].cursor);
+// 
+//   /* first check the current entry isn't the end of the folder */
+//   if(de->filename[0] == 0) {
+//     return -1;
+//   }
+//   /* now keep looping past LFN entries until a valid one or the end of dir is found */
+//   while(1) {
+//     /* otherwise look for the next entry */
+// //     iprintf("looping %d\r\n", file_num[fd].cursor);
+//     if(file_num[fd].cursor + 32 == 512) {
+//       if(fat_next_sector(fd) == -1) {
+//         return -1;  /* there are no more sectors allocated to this directory */
+//       }
+//     } else {
+//       file_num[fd].cursor += 32;
+//     }
+//     de = (direntS *)(file_num[fd].buffer + file_num[fd].cursor);
+//     if(de->filename[0] == 0) {
+//       return -1;
+//     }
+//     if(!((de->attributes == 0x0F) || (de->attributes & FAT_ATT_VOL) || (de->filename[0] == 0xe5))) {
+//       /* if it's not an LFN, not a volume label or deleted it's a real file. */
+// //       iprintf("fatname to str\r\n");
+// //       for(i=0;i<4;i++) {
+// //         for(j=0;j<8;j++) {
+// //           iprintf("%02X ", file_num[fd].buffer[file_num[fd].cursor + i * 8 + j]);
+// //         }
+// //         iprintf("\r\n");
+// //       }
+// //       iprintf("%d\r\n", de->filename[0]);
+// //       for(i=0;i<12;i++) {
+// //         iprintf("%02X ", de->filename[i]);
+// //       }
+//       fatname_to_str(out_de->d_name, de->filename);
+// //       iprintf("\r\n");
+// //       iprintf("%s\r\n", de->filename);
+// //       iprintf("%s\r\n", out_de->d_name);
+//       if(fatfs.type == PART_TYPE_FAT16) {
+//         out_de->d_ino = de->first_cluster;
+//       } else {
+//         out_de->d_ino = de->first_cluster + (de->high_first_cluster << 16);
+//       }
+//       return 0;
+//     }
+//   }
+// }
+
+/*************************************************************************************************/
+/* High level file system calls based on unistd.h                                                */
+/*************************************************************************************************/
+
+
+int fat_unlink(const char *path, int *rerrno) {
+  int fd;
+  // check the file isn't open
+  
+  // find the file
+  fd = fat_open(path, O_RDONLY, 0777, rerrno);
+  if(fd < 0) {
+    return -1;
+  }
+//   printf("fd.entry_sector = %d\n", file_num[fd].entry_sector);
+//   printf("fd.entry_number = %d\n", file_num[fd].entry_number);
+  
+  // remove the directory entry
+  // in fat this just means setting the first character of the filename to 0xe5
+  block_read(file_num[fd].entry_sector, file_num[fd].buffer);
+  file_num[fd].buffer[file_num[fd].entry_number * 32] = 0xe5;
+  block_write(file_num[fd].entry_sector, file_num[fd].buffer);
+  
+  // un-allocate the clusters
+  fat_free_clusters(file_num[fd].full_first_cluster);
+  file_num[fd].flags = FAT_FLAG_OPEN;           // make sure that there are no dirty flags
+  
+  fat_close(fd, rerrno);
+  return 0;
+}
+
+int fat_rmdir(const char *path, int *rerrno) {
+  struct dirent de;
+  int f_dir;
+  int i;
+  
+  // same as unlink() but needs to check that the directory is empty first
+  if((f_dir = fat_open(path, O_RDONLY, 0777, rerrno)) == -1) {
+    return -1;
+  }
+  
+  while(!(fat_get_next_dirent(f_dir, &de, rerrno))) {
+    if(!((strcmp(de.d_name, ".") == 0) || (strcmp(de.d_name, "..") == 0))) {
+      printf("Found an entry :( %s [", de.d_name);
+      for(i=0;i<8;i++) {
+        printf("%02X ", *(uint8_t *)&de.d_name[i]);
+      }
+      printf("] (name[0] == 0xE5: %d) %c %02X\n", de.d_name[0] == (char)0xE5, de.d_name[0], de.d_name[0]);
+      fat_close(f_dir, rerrno);
+      *rerrno = ENOTEMPTY;
+      return -1;
+    }
+  }
+  
+  if(fat_close(f_dir, rerrno)) {
+    return -1;
+  }
+  // no entries found, delete it
+  return fat_unlink(path, rerrno);
+}
+
+int fat_mkdir(const char *path, int mode, int *rerrno) {
+  direntS d;
+  uint32_t cluster;
+  uint32_t parent_cluster;
+  int f_dir;
+  char local_path[MAX_PATH_LEN];
+  char *filename;
+  char dosname[13];
+  char *ptr;
+  int i;
+  int int_call = FAT_INTERNAL_CALL;
+  
+  // split the path into parent and new directory names
+  if(strlen(path)+1 > MAX_PATH_LEN) {
+    *rerrno = ENAMETOOLONG;
+    return -1;
+  }
+  
+  if(path[0] != '/') {
+    *rerrno = ENAMETOOLONG;
+    return -1;
+  }
+  
+  strcpy(local_path, path);
+  // can't work with a trailing slash even though this is a directory
+  if(local_path[strlen(local_path)-1] == '/') {
+    local_path[strlen(local_path)-1] = 0;
+  }
+  filename = local_path;
+  while((ptr = strstr(filename, "/"))) {
+    filename = ptr + 1;
+  }
+  *(filename - 1) = 0;
+  
+  // allocate a cluster for the new directory
+  cluster = fat_get_free_cluster();
+  
+  // open the parent directory
+  if(strcmp(local_path, "") == 0) {
+    f_dir = fat_open("/", O_RDWR, 0777, &int_call);
+  } else {
+    f_dir = fat_open(local_path, O_RDWR, 0777, &int_call);
+  }
+  if(f_dir < 0) {
+    *rerrno = int_call;
+    fat_free_clusters(cluster);
+    return -1;
+  }
+  
+  parent_cluster = file_num[f_dir].full_first_cluster;
+//   printf("parent_cluster = %d\n", parent_cluster);
+  
+  // seek to the end of the directory
+  do {
+    fat_read(f_dir, &d, sizeof(d), rerrno);
+  } while(d.filename[0] != 0);
+  
+  // just read the first empty directory entry so we need to seek back to overwrite it
+  if(fat_lseek(f_dir, -32, SEEK_CUR, rerrno) == -33) {
+    fat_close(f_dir, rerrno);
+    fat_free_clusters(cluster);
+    return -1;
+  }
+  
+  if(str_to_fatname(filename, dosname)) {
+    fat_free_clusters(cluster);
+    fat_close(f_dir, rerrno);
+    *rerrno = ENAMETOOLONG;
+    return -1;
+  }
+  // write a new directory entry
+  for(i=0;i<11;i++) {
+    if((i < 8) && (i < strlen(dosname))) {
+      d.filename[i] = dosname[i];
+    } else {
+      d.filename[i] = ' ';
+    }
+  }
+  d.attributes = FAT_ATT_SUBDIR | FAT_ATT_ARC;
+  d.reserved = 0x00;
+  d.create_time_fine = (time(NULL) & 1) * 100;
+  d.create_time = fat_from_unix_time(time(NULL));
+  d.create_date = fat_from_unix_date(time(NULL));
+  d.access_date = fat_from_unix_date(time(NULL));
+  d.high_first_cluster = cluster >> 16;
+  d.modified_time = fat_from_unix_time(time(NULL));
+  d.modified_date = fat_from_unix_date(time(NULL));
+  d.first_cluster = cluster & 0xffff;
+  d.size = fatfs.sectors_per_cluster * block_get_block_size();
+  
+//   printf("write new folder\n");
+  if(fat_write(f_dir, &d, sizeof(d), rerrno) == -1) {
+    return -1;
+  }
+  
+  memset(&d, 0, sizeof(d));
+  
+//   printf("here\n");
+  if(fat_write(f_dir, &d, sizeof(d), rerrno) == -1) {
+    return -1;
+  }
+  
+  if(fat_close(f_dir, rerrno)) {
+    return -1;
+  }
+  
+  // create . and .. entries in the new directory cluster and an end of directory entry
+  if((f_dir = fat_open(path, O_RDWR, 0777, &int_call)) == -1) {
+    *rerrno = int_call;
+    return -1;
+  }
+  
+  d.filename[0] = '.';
+  for(i=1;i<11;i++) {
+    d.filename[i] = ' ';
+  }
+  d.attributes = FAT_ATT_SUBDIR | FAT_ATT_ARC;
+  d.reserved = 0x00;
+  d.create_time_fine = (time(NULL) & 1) * 100;
+  d.create_time = fat_from_unix_time(time(NULL));
+  d.create_date = fat_from_unix_date(time(NULL));
+  d.access_date = fat_from_unix_date(time(NULL));
+  d.high_first_cluster = cluster >> 16;
+  d.modified_time = fat_from_unix_time(time(NULL));
+  d.modified_date = fat_from_unix_date(time(NULL));
+  d.first_cluster = cluster & 0xffff;
+  d.size = fatfs.sectors_per_cluster * block_get_block_size();
+  
+  if((fat_write(f_dir, &d, sizeof(direntS), rerrno)) == -1) {
+    return -1;
+  }
+  
+  d.filename[1] = '.';
+  d.high_first_cluster = parent_cluster >> 16;
+  d.first_cluster = parent_cluster & 0xffff;
+  
+  if((fat_write(f_dir, &d, sizeof(direntS), rerrno)) == -1) {
+    return -1;
+  }
+  
+  memset(&d, 0, sizeof(direntS));
+  
+  if((fat_write(f_dir, &d, sizeof(direntS), rerrno)) == -1) {
+    return -1;
+  }
+  
+  if(fat_close(f_dir, rerrno)) {
+    return -1;
+  }
+  
+  return 0;
 }
