@@ -136,18 +136,22 @@ int test_open(int p) {
 }
 
 extern struct fat_info fatfs;
+extern FileS file_num[];
 
 int main(int argc, char *argv[]) {
   int p = 0;
   int rerrno = 0;
-  FILE *fp;
-  int len;
-  uint8_t *d;
   int result;
   int parts;
   uint8_t temp[512];
   struct partition *part_list;
   
+  if(argc < 2) {
+      printf("Please specify a disk image to work on.\n");
+      exit(-2);
+  }
+  
+  block_pc_set_image_name(argv[1]);
 //   int v;
   printf("Running FAT tests...\n\n");
   printf("[%4d] start block device emulation...", p++);
@@ -181,7 +185,10 @@ int main(int argc, char *argv[]) {
   //   p = test_open(p);
 
   int fd;
-  
+  int i;
+  char block_o_data[1024];
+  uint32_t temp_uint = 0xDEADBEEF;
+  memset(block_o_data, 0x42, 1024);
 //   printf("Open\n");
 //   fd = fat_open("/newfile.txt", O_WRONLY | O_CREAT, 0777, &rerrno);
 //   printf("fd = %d, errno=%d (%s)\n", fd, rerrno, strerror(rerrno));
@@ -220,11 +227,65 @@ int main(int argc, char *argv[]) {
   result = fat_mkdir("/foo/bar", 0777, &rerrno);
   printf("mkdir /foo/bar: %d (%d) %s\n", result, rerrno, strerror(rerrno));
   
-  result = fat_rmdir("/foo/bar", &rerrno);
-  printf("rmdir /foo/bar: %d (%d) %s\n", result, rerrno, strerror(rerrno));
+  result = fat_mkdir("/web", 0777, &rerrno);
+  printf("mkdir /web: %d (%d) %s\n", result, rerrno, strerror(rerrno));
   
-  result = fat_rmdir("/foo", &rerrno);
-  printf("rmdir /foo: %d (%d) %s\n", result, rerrno, strerror(rerrno));
+  if((fd = fat_open("/foo/bar/file.html", O_WRONLY | O_CREAT, 0777, &rerrno)) == -1) {
+    printf("Couldn't open file (%d) %s\n", rerrno, strerror(rerrno));
+    exit(-1);
+  }
+  
+  for(i=0;i<20;i++) {
+//     printf("fd.cluster = %d\n", file_num[fd].full_first_cluster);
+    if(fat_write(fd, block_o_data, 1024, &rerrno) == -1) {
+      printf("Error writing to new file (%d) %s\n", rerrno, strerror(rerrno));
+    }
+  }
+  
+  if(fat_close(fd, &rerrno)) {
+    printf("Error closing file (%d) %s\n", rerrno, strerror(rerrno));
+  }
+  
+  printf("Open directory\n");
+  if((fd = fat_open("/foo/bar", O_RDONLY, 0777, &rerrno)) < 0) {
+    printf("Failed to open directory (%d) %s\n", rerrno, strerror(rerrno));
+    exit(-1);
+  }
+  struct dirent de;
+  
+  while(!fat_get_next_dirent(fd, &de, &rerrno)) {
+    printf("%s\n", de.d_name);
+  }
+  printf("Directory read failed. (%d) %s\n", rerrno, strerror(rerrno));
+  
+  if(fat_close(fd, &rerrno)) {
+    printf("Error closing directory, (%d) %s\n", rerrno, strerror(rerrno));
+  }
+  
+  if(fat_open("/web/version.txt", O_RDONLY, 0777, &rerrno) < 0) {
+    printf("Error opening missing file (%d) %s\n", rerrno, strerror(rerrno));
+  } else {
+    printf("success! opened non existent file for reading.\n");
+  }
+  
+  printf("Trying to write a big file.\n");
+  
+  if((fd = fat_open("big_file.bin", O_WRONLY | O_CREAT, 0777, &rerrno))) {
+      printf("Error opening a file for writing.\n");
+  }
+  
+  for(i=0;i<1024 * 1024 * 10;i++) {
+      if((i & 0xfff) == 0)
+          printf("Written %d bytes\n", i * 4);
+      fat_write(fd, &temp_uint, 4, &rerrno);
+  }
+  fat_close(fd, &rerrno);
+  
+//   result = fat_rmdir("/foo/bar", &rerrno);
+//   printf("rmdir /foo/bar: %d (%d) %s\n", result, rerrno, strerror(rerrno));
+//   
+//   result = fat_rmdir("/foo", &rerrno);
+//   printf("rmdir /foo: %d (%d) %s\n", result, rerrno, strerror(rerrno));
   
   block_pc_snapshot_all("writenfs.img");
   exit(0);

@@ -64,7 +64,7 @@ struct fat_info {
   uint32_t  root_start;
   uint32_t  root_cluster;
   uint8_t   type;               // type of filesystem (FAT16 or FAT32)
-  uint8_t   part_start;         // start of partition containing filesystem
+  blockno_t part_start;         // start of partition containing filesystem
   uint32_t  total_sectors;
   uint8_t   sysbuf[512];
 };
@@ -179,6 +179,8 @@ typedef struct {
 // int sdfat_lookup_path(int, const char *);
 // int sdfat_next_sector(int fd);
 
+int str_to_fatname(char *url, char *dosname);
+
 int fat_mount(blockno_t start, blockno_t volume_size, uint8_t part_type_hint);
 
 /**
@@ -205,6 +207,8 @@ int fat_fstat(int, struct stat *, int *);
 int fat_lseek(int, int, int, int *);
 int fat_get_next_dirent(int, struct dirent *, int *rerrno);
 
+int fat_unlink(const char *path, int *rerrno);
 int fat_rmdir(const char *path, int *rerrno);
 int fat_mkdir(const char *path, int mode, int *rerrno);
+
 #endif /* ifndef GRISTLE_H */

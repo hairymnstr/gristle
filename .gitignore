@@ -1,5 +1,6 @@
 test/test_gristle
-test/testext.img
+*.img
 test/test_embext
+test/show_info
 docs/
 

@@ -37,29 +37,55 @@
 uint64_t block_fs_size=0;
 uint8_t *blocks = NULL;
 int block_ro;
+char *image_name = NULL;
+
+void block_pc_set_image_name(char *filename) {
+    if(image_name) {
+        free(image_name);
+    }
+    image_name = (char *)malloc(strlen(filename) + 1);
+    strcpy(image_name, filename);
+    return;
+}
 
 int block_init() {
   FILE *block_fp;
-  if(!(block_fp = fopen("testfat.img", "rb"))) {
+  if(!(block_fp = fopen(image_name, "rb"))) {
     return -1;
   }
   fseek(block_fp, 0, SEEK_END);
   block_fs_size = ftell(block_fp);
   if(!(block_fs_size < 2048L * 1024L * 1024L)) {
-    printf("Aborting, image is over 2GB.\n");
-    exit(-1);
+    fprintf(stderr, "Aborting, image is over 2GB.\n");
+    fclose(block_fp);
+    return -1;
   }
-  blocks = (uint8_t *)malloc(sizeof(uint8_t) * block_fs_size);
+  if((blocks = (uint8_t *)malloc(sizeof(uint8_t) * block_fs_size)) == NULL) {
+      fprintf(stderr, "Failed to malloc() enough memory for the filesystem.\r\n");
+      fclose(block_fp);
+      return -1;
+  }
   
   fseek(block_fp, 0, SEEK_SET);
-  fread(blocks, 1, block_fs_size, block_fp);
+  if(fread(blocks, 1, block_fs_size, block_fp) < block_fs_size) {
+      free(blocks);
+      fprintf(stderr, "Failed to read the filesystem image.\n");
+      return -1;
+  }
   
   fclose(block_fp);
   return 0;
 }
 
+int block_halt() {
+    if(blocks) {
+        free(blocks);
+    }
+    return 0;
+}
+
 int block_read(blockno_t block, void *buffer) {
-  printf("block read from %x\n", block * BLOCK_SIZE);
+//   printf("block read from %x\n", block * BLOCK_SIZE);
   /* we can't allow the file to grow (wouldn't happen with a physical volume) so need to check
      first because in rb+ file will grow if we seek past the end. */
   if((block+1) * BLOCK_SIZE - 1 > block_fs_size) {
@@ -75,7 +101,7 @@ int block_read(blockno_t block, void *buffer) {
 }
 
 int block_write(blockno_t block, void *buffer) {
-  printf("block write at %x\n", block * BLOCK_SIZE);
+//   printf("block write at %x\n", block * BLOCK_SIZE);
   if((block + 1) * BLOCK_SIZE - 1 > block_fs_size) {
     return -1;
   }
@@ -89,7 +115,7 @@ int block_write(blockno_t block, void *buffer) {
   return 0;
 }
 
-int block_get_volume_size() {
+blockno_t block_get_volume_size() {
   return block_fs_size / BLOCK_SIZE;
 }
 

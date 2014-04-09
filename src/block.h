@@ -61,6 +61,18 @@ typedef uint32_t blockno_t;
 int block_init();
 
 /**
+ * \brief Halt the block driver.
+ * 
+ * This function shall safely unmount and stop any block device.  Buffers will be flushed, and
+ * hardware may be stopped (e.g. an SPI peripheral powered down).  Can be called from an unmount()
+ * routine to put the device to sleep.  Any future calls to the block driver must be preceeded by
+ * a call to block_init() again.
+ * 
+ * \return 0 on success, other values indicate an error.
+ **/
+int block_halt();
+
+/**
  * \brief Read the specified block number into memory at the given address.
  * 
  * Reads a contiguous block of #BLOCK_SIZE bytes from the medium into a pre-allocated area of
@@ -93,7 +105,7 @@ int block_write(blockno_t block, void *buf);
  * 
  * \return Number of blocks in total on the disk.
  **/
-int block_get_volume_size();
+blockno_t block_get_volume_size();
 
 /**
  * \brief Returns the compiled value of #BLOCK_SIZE
