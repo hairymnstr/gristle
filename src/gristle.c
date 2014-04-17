@@ -390,9 +390,9 @@ int fat_get_free_cluster() {
         if(block_write(i, fatfs.sysbuf)) {
           return 0xFFFFFFFF;
         }
-// #ifdef TRACE
+#ifdef TRACE
   printf("fat_get_free_cluster returning %d\n", ((i - fatfs.active_fat_start) * (512 / fatfs.fat_entry_len)) + j);
-// #endif
+#endif
         return ((i - fatfs.active_fat_start) * (512 / fatfs.fat_entry_len)) + j;
       }
     }
@@ -819,7 +819,11 @@ int fat_lookup_path(int fd, const char *path, int *rerrno) {
         if(*(char *)(file_num[fd].buffer + (i * 32)) == 0) {
           memcpy(file_num[fd].filename, dosname, 8);
           memcpy(file_num[fd].extension, dosname+8, 3);
-          *rerrno = ENOENT;
+          if(depth < levels) {
+            *rerrno = GRISTLE_BAD_PATH;
+          } else {
+            *rerrno = ENOENT;
+          }
           return -1;
         }
         if(strncmp(dosname, (char *)(file_num[fd].buffer + (i * 32)), 11) == 0) {
@@ -832,7 +836,11 @@ int fat_lookup_path(int fd, const char *path, int *rerrno) {
         if(fat_next_sector(fd) != 0) {
           memcpy(file_num[fd].filename, dosname, 8);
           memcpy(file_num[fd].extension, dosname+8, 3);
-          (*rerrno) = ENOENT;
+          if(depth < levels) {
+            (*rerrno) = GRISTLE_BAD_PATH;
+          } else {
+            (*rerrno) = ENOENT;
+          }
           return -1;
         }
       } else {
@@ -1241,6 +1249,13 @@ int fat_open(const char *name, int flags, int mode, int *rerrno) {
       (*rerrno) = 0;    /* file not found but we're aloud to create it so success */
       return fd;
     }
+  } else if((i == -1) && ((*rerrno) == GRISTLE_BAD_PATH)) {
+      /* if a parent folder of the requested file does not exist we can't create the file
+       * so a different response is given from the lookup path, but the POSIX standard
+       * still requires ENOENT returned. */
+      file_num[fd].flags = 0;
+      (*rerrno) = ENOENT;
+      return -1;
   } else if(i == 0) {
     /* file does exist */
     if((flags & O_CREAT) && (flags & O_EXCL)) {
@@ -1607,6 +1622,7 @@ int fat_get_next_dirent(int fd, struct dirent *out_de, int *rerrno) {
 
 int fat_unlink(const char *path, int *rerrno) {
   int fd;
+  struct stat st;
   // check the file isn't open
   
   // find the file
@@ -1616,6 +1632,21 @@ int fat_unlink(const char *path, int *rerrno) {
   }
 //   printf("fd.entry_sector = %d\n", file_num[fd].entry_sector);
 //   printf("fd.entry_number = %d\n", file_num[fd].entry_number);
+  
+  if(fat_fstat(fd, &st, rerrno)) {
+      return -1;
+  }
+  
+  if(st.st_mode & S_IFDIR) {
+      // implementation does not support unlink() on directories, use rmdir instead.
+      // unlink does not free blocks used by files in child directories so creates a "memory leak"
+      // on disk when used on directories.  POSIX standard says in this case we should return
+      // EPERM as errno
+      file_num[fd].flags = FAT_FLAG_OPEN;   // make sure atime isn't affected
+      fat_close(fd, rerrno);
+      (*rerrno) = EPERM;
+      return -1;
+  }
   
   // remove the directory entry
   // in fat this just means setting the first character of the filename to 0xe5

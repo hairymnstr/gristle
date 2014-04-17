@@ -35,10 +35,10 @@
 #include "block.h"
 #include "dirent.h"
 
+#define GRISTLE_BAD_PATH 255
+
 #define MAX_OPEN_FILES 4
 #define MAX_PATH_LEN 256
-
-#define FIRST_DISC_FILENO 3 /* first real file (on disc) */
 
 #define FAT_ERROR_CLUSTER 1
 #define FAT_END_OF_FILE 2
