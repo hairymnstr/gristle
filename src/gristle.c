@@ -1126,14 +1126,6 @@ int fat_mount_fat32(blockno_t start, blockno_t volume_size) {
   fatfs.cluster0 = i;
   fatfs.root_cluster = boot32->root_start;
 
-  // check the calculated values are within the volume 
-  if(fatfs.root_start > (start + volume_size)) {
-#ifdef FAT_DEBUG
-    printf("Root start is beyond the end of the volume.\r\n");
-#endif
-    return -1;
-  }
-  
   if(boot32->total_sectors == 0) {
     fatfs.total_sectors = boot32->big_total_sectors;
   } else {
