@@ -35,10 +35,10 @@ int read_partition_table(uint8_t *mbr, blockno_t volume_size, struct partition *
   static struct partition retval[4];
   mbr_entry *entry = (mbr_entry *)(mbr + PARTITION0START);
   int i, j=0;
-  printf("Start: 0, Length: %u\r\n", (unsigned int)volume_size);
+//   printf("Start: 0, Length: %u\r\n", (unsigned int)volume_size);
   for(i=0;i<4;i++) {
     // validate this partition entry
-    printf("Start: %u, Length: %u, Type: %02x\r\n", (unsigned int)entry->lba_start, (unsigned int)entry->length, (unsigned int)entry->type);
+//     printf("Start: %u, Length: %u, Type: %02x\r\n", (unsigned int)entry->lba_start, (unsigned int)entry->length, (unsigned int)entry->type);
     if((entry->lba_start < volume_size) && 
        ((entry->lba_start + entry->length) <= volume_size) &&
        (entry->lba_start > 0) &&

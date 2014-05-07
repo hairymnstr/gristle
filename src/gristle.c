@@ -36,7 +36,12 @@
 #include <errno.h>
 #include "block.h"
 #include "partition.h"
+#include "config.h"
 #include "gristle.h"
+
+#ifndef GRISTLE_TIME
+#define GRISTLE_TIME time(NULL)
+#endif
 
 /**
  * global variable structures.
@@ -57,37 +62,37 @@ int fat_flush_fileinfo(int fd);
 
 /* fat_to_unix_time - convert a time field from FAT format to unix epoch 
    seconds. */
-time_t fat_to_unix_time(uint16_t time) {
+time_t fat_to_unix_time(uint16_t fat_time) {
   struct tm time_str;
   time_str.tm_year = 0;
   time_str.tm_mon = 0;
   time_str.tm_mday = 0;
-  time_str.tm_hour = ((time & 0xF800) >> 11);
-  time_str.tm_min = ((time & 0x03E0) >> 5);
-  time_str.tm_sec = (time & 0x001F) << 1;
+  time_str.tm_hour = ((fat_time & 0xF800) >> 11);
+  time_str.tm_min = ((fat_time & 0x03E0) >> 5);
+  time_str.tm_sec = (fat_time & 0x001F) << 1;
   time_str.tm_isdst = -1;
   return mktime(&time_str);
 }
 
 uint16_t fat_from_unix_time(time_t seconds) {
   struct tm *time_str;
-  uint16_t fattime;
+  uint16_t fat_time;
   time_str = gmtime(&seconds);
   
-  fattime = 0;
+  fat_time = 0;
   
-  fattime += time_str->tm_hour << 11;
-  fattime += time_str->tm_min << 5;
-  fattime += time_str->tm_sec >> 1;
-  return fattime;
+  fat_time += time_str->tm_hour << 11;
+  fat_time += time_str->tm_min << 5;
+  fat_time += time_str->tm_sec >> 1;
+  return fat_time;
 }
 
-time_t fat_to_unix_date(uint16_t date) {
+time_t fat_to_unix_date(uint16_t fat_date) {
   struct tm time_str;
 
-  time_str.tm_year = (((date & 0xFE00) >> 9) + 80);
-  time_str.tm_mon = (((date & 0x01E0) >> 5) - 1);
-  time_str.tm_mday = (date & 0x001F) ;
+  time_str.tm_year = (((fat_date & 0xFE00) >> 9) + 80);
+  time_str.tm_mon = (((fat_date & 0x01E0) >> 5) - 1);
+  time_str.tm_mday = (fat_date & 0x001F) ;
   time_str.tm_hour = 0;
   time_str.tm_min = 0;
   time_str.tm_sec = 0;
@@ -98,17 +103,17 @@ time_t fat_to_unix_date(uint16_t date) {
 
 uint16_t fat_from_unix_date(time_t seconds) {
   struct tm *time_str;
-  uint16_t fatdate;
+  uint16_t fat_date;
   
   time_str = gmtime(&seconds);
   
-  fatdate = 0;
+  fat_date = 0;
   
-  fatdate += (time_str->tm_year - 80) << 9;
-  fatdate += (time_str->tm_mon + 1) << 5;
-  fatdate += time_str->tm_mday;
+  fat_date += (time_str->tm_year - 80) << 9;
+  fat_date += (time_str->tm_mon + 1) << 5;
+  fat_date += time_str->tm_mday;
   
-  return fatdate;
+  return fat_date;
 }
 
 /*
@@ -120,11 +125,11 @@ uint16_t fat_from_unix_date(time_t seconds) {
  */
 int fat_update_atime(int fd) {
   uint16_t new_date, old_date;
-  new_date = fat_from_unix_date(time(NULL));
+  new_date = fat_from_unix_date(GRISTLE_TIME);
   old_date = fat_from_unix_date(file_num[fd].accessed);
   
   if(old_date != new_date) {
-    file_num[fd].accessed = time(NULL);
+    file_num[fd].accessed = GRISTLE_TIME;
     file_num[fd].flags |= FAT_FLAG_FS_DIRTY;
   }
   
@@ -138,7 +143,7 @@ int fat_update_atime(int fd) {
  * so to reduce overheads, the date is just set and the fs_dirty flag set.
  */
 int fat_update_mtime(int fd) {
-  file_num[fd].modified = time(NULL);
+  file_num[fd].modified = GRISTLE_TIME;
   file_num[fd].flags |= FAT_FLAG_FS_DIRTY;
   return 0;
 }
@@ -643,8 +648,8 @@ int fat_flush_fileinfo(int fd) {
     return 0;
   }
   if(file_num[fd].full_first_cluster == 0) {
-    printf("Bad first cluster!\r\n");
-    printf("  %s\r\n", file_num[fd].filename);
+//     printf("Bad first cluster!\r\n");
+//     printf("  %s\r\n", file_num[fd].filename);
     return 0;
   }
   memcpy(de.filename, file_num[fd].filename, 8);
@@ -791,7 +796,7 @@ int fat_lookup_path(int fd, const char *path, int *rerrno) {
   file_num[fd].parent_cluster = fatfs.root_cluster;
   while(1) {
     if(depth > levels) {
-      printf("Serious filesystem error\r\n");
+//       printf("Serious filesystem error\r\n");
       *rerrno = EIO;
       return -1;
     }
@@ -799,14 +804,14 @@ int fat_lookup_path(int fd, const char *path, int *rerrno) {
 //     if(make_dos_name(dosname, path, &path_pointer)) {
 //     printf("depth = %d, levels = %d\n", depth, levels);
     if(str_to_fatname(elements[depth], dosname2)) {
-      printf("didn't make a dos name :(\n");
-      printf("Path: %s\n", path);
+//       printf("didn't make a dos name :(\n");
+//       printf("Path: %s\n", path);
       (*rerrno) = EIO; // can't be ENOENT or the driver may decide to create it if open for writing
       return -1;  /* invalid path name */
     }
     path_pointer = 0;
     if(make_dos_name(dosname, dosname2, &path_pointer)) {
-      printf("step 2 dosname failure.\n");
+//       printf("step 2 dosname failure.\n");
       *rerrno = EIO;
       return -1;
     }
@@ -1229,7 +1234,7 @@ int fat_open(const char *name, int flags, int mode, int *rerrno) {
       file_num[fd].entry_sector = 0;
       file_num[fd].entry_number = 0;
       file_num[fd].file_sector = 0;
-      file_num[fd].created = time(NULL);
+      file_num[fd].created = GRISTLE_TIME;
       file_num[fd].modified = 0;
       file_num[fd].accessed = 0;
       
@@ -1295,8 +1300,8 @@ int fat_open(const char *name, int flags, int mode, int *rerrno) {
           file_num[fd].cluster = 0;
           file_num[fd].sectors_left = 0;
           file_num[fd].file_sector = 0;
-          file_num[fd].created = time(NULL);
-          file_num[fd].modified = time(NULL);
+          file_num[fd].created = GRISTLE_TIME;
+          file_num[fd].modified = GRISTLE_TIME;
           file_num[fd].flags |= FAT_FLAG_FS_DIRTY;
         }
         file_num[fd].file_sector = 0;
@@ -1557,60 +1562,29 @@ int fat_get_next_dirent(int fd, struct dirent *out_de, int *rerrno) {
     }
   }
 }
-// //   int i,j;
-// //   iprintf("%d\r\n", file_num[fd].cursor);
-//   de = (direntS *)(file_num[fd].buffer + file_num[fd].cursor);
-// 
-//   /* first check the current entry isn't the end of the folder */
-//   if(de->filename[0] == 0) {
-//     return -1;
-//   }
-//   /* now keep looping past LFN entries until a valid one or the end of dir is found */
-//   while(1) {
-//     /* otherwise look for the next entry */
-// //     iprintf("looping %d\r\n", file_num[fd].cursor);
-//     if(file_num[fd].cursor + 32 == 512) {
-//       if(fat_next_sector(fd) == -1) {
-//         return -1;  /* there are no more sectors allocated to this directory */
-//       }
-//     } else {
-//       file_num[fd].cursor += 32;
-//     }
-//     de = (direntS *)(file_num[fd].buffer + file_num[fd].cursor);
-//     if(de->filename[0] == 0) {
-//       return -1;
-//     }
-//     if(!((de->attributes == 0x0F) || (de->attributes & FAT_ATT_VOL) || (de->filename[0] == 0xe5))) {
-//       /* if it's not an LFN, not a volume label or deleted it's a real file. */
-// //       iprintf("fatname to str\r\n");
-// //       for(i=0;i<4;i++) {
-// //         for(j=0;j<8;j++) {
-// //           iprintf("%02X ", file_num[fd].buffer[file_num[fd].cursor + i * 8 + j]);
-// //         }
-// //         iprintf("\r\n");
-// //       }
-// //       iprintf("%d\r\n", de->filename[0]);
-// //       for(i=0;i<12;i++) {
-// //         iprintf("%02X ", de->filename[i]);
-// //       }
-//       fatname_to_str(out_de->d_name, de->filename);
-// //       iprintf("\r\n");
-// //       iprintf("%s\r\n", de->filename);
-// //       iprintf("%s\r\n", out_de->d_name);
-//       if(fatfs.type == PART_TYPE_FAT16) {
-//         out_de->d_ino = de->first_cluster;
-//       } else {
-//         out_de->d_ino = de->first_cluster + (de->high_first_cluster << 16);
-//       }
-//       return 0;
-//     }
-//   }
-// }
 
 /*************************************************************************************************/
 /* High level file system calls based on unistd.h                                                */
 /*************************************************************************************************/
+#ifdef GRISTLE_RO
+// if a read only filesystem build has been defined avoid including any system calls here
+int fat_unlink(const char *path __attribute__((__unused__)), int *rerrno) {
+    *rerrno = EROFS;
+    return -1;
+}
 
+int fat_rmdir(const char *path __attribute__((__unused__)), int *rerrno) {
+    *rerrno = EROFS;
+    return -1;
+}
+
+int fat_mkdir(const char *path __attribute__((__unused__)), int mode __attribute__((__unused__)),
+              int *rerrno) {
+    *rerrno = EROFS;
+    return -1;
+}
+
+#else
 
 int fat_unlink(const char *path, int *rerrno) {
   int fd;
@@ -1776,13 +1750,13 @@ int fat_mkdir(const char *path, int mode __attribute__((__unused__)), int *rerrn
   }
   d.attributes = FAT_ATT_SUBDIR | FAT_ATT_ARC;
   d.reserved = 0x00;
-  d.create_time_fine = (time(NULL) & 1) * 100;
-  d.create_time = fat_from_unix_time(time(NULL));
-  d.create_date = fat_from_unix_date(time(NULL));
-  d.access_date = fat_from_unix_date(time(NULL));
+  d.create_time_fine = (GRISTLE_TIME & 1) * 100;
+  d.create_time = fat_from_unix_time(GRISTLE_TIME);
+  d.create_date = fat_from_unix_date(GRISTLE_TIME);
+  d.access_date = fat_from_unix_date(GRISTLE_TIME);
   d.high_first_cluster = cluster >> 16;
-  d.modified_time = fat_from_unix_time(time(NULL));
-  d.modified_date = fat_from_unix_date(time(NULL));
+  d.modified_time = fat_from_unix_time(GRISTLE_TIME);
+  d.modified_date = fat_from_unix_date(GRISTLE_TIME);
   d.first_cluster = cluster & 0xffff;
   d.size = 0;
   
@@ -1818,13 +1792,13 @@ int fat_mkdir(const char *path, int mode __attribute__((__unused__)), int *rerrn
   }
   d.attributes = FAT_ATT_SUBDIR | FAT_ATT_ARC;
   d.reserved = 0x00;
-  d.create_time_fine = (time(NULL) & 1) * 100;
-  d.create_time = fat_from_unix_time(time(NULL));
-  d.create_date = fat_from_unix_date(time(NULL));
-  d.access_date = fat_from_unix_date(time(NULL));
+  d.create_time_fine = (GRISTLE_TIME & 1) * 100;
+  d.create_time = fat_from_unix_time(GRISTLE_TIME);
+  d.create_date = fat_from_unix_date(GRISTLE_TIME);
+  d.access_date = fat_from_unix_date(GRISTLE_TIME);
   d.high_first_cluster = cluster >> 16;
-  d.modified_time = fat_from_unix_time(time(NULL));
-  d.modified_date = fat_from_unix_date(time(NULL));
+  d.modified_time = fat_from_unix_time(GRISTLE_TIME);
+  d.modified_date = fat_from_unix_date(GRISTLE_TIME);
   d.first_cluster = cluster & 0xffff;
   d.size = 0;           // directory entries have zero length according to the standard
   
@@ -1857,3 +1831,4 @@ int fat_mkdir(const char *path, int mode __attribute__((__unused__)), int *rerrn
   
   return 0;
 }
+#endif /* ifdef GRISTLE_RO */
