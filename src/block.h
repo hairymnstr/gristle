@@ -124,4 +124,14 @@ int block_get_block_size();
  **/
 int block_get_device_read_only();
 
+/**
+ * \brief Get error description from the block driver layer.
+ *
+ * This is somewhat like errno at the filesystem layer but for the block device, can return
+ * invalid card type etc.
+ *
+ * \return non zero to indicate an error, errors are block driver specific.
+ **/
+int block_get_error();
+
 #endif /* ifndef BLOCK_H */
