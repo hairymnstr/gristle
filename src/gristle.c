@@ -1586,6 +1586,25 @@ int fat_mkdir(const char *path __attribute__((__unused__)), int mode __attribute
 
 #else
 
+/**
+ * \brief internal only function called by rmdir and unlink to actually delete entries
+ * 
+ * Can be used to remove any entry, does no checking for empty directories etc.
+ * Should be called on files by unlink() and on empty directories by rmdir()
+ **/
+int fat_delete(int fd, int *rerrno) {
+    // remove the directory entry
+    // in fat this just means setting the first character of the filename to 0xe5
+    block_read(file_num[fd].entry_sector, file_num[fd].buffer);
+    file_num[fd].buffer[file_num[fd].entry_number * 32] = 0xe5;
+    block_write(file_num[fd].entry_sector, file_num[fd].buffer);
+    
+    // un-allocate the clusters
+    fat_free_clusters(file_num[fd].full_first_cluster);
+    file_num[fd].flags = FAT_FLAG_OPEN;           // make sure that there are no dirty flags
+    return 0;
+}
+
 int fat_unlink(const char *path, int *rerrno) {
   int fd;
   struct stat st;
@@ -1614,15 +1633,7 @@ int fat_unlink(const char *path, int *rerrno) {
       return -1;
   }
   
-  // remove the directory entry
-  // in fat this just means setting the first character of the filename to 0xe5
-  block_read(file_num[fd].entry_sector, file_num[fd].buffer);
-  file_num[fd].buffer[file_num[fd].entry_number * 32] = 0xe5;
-  block_write(file_num[fd].entry_sector, file_num[fd].buffer);
-  
-  // un-allocate the clusters
-  fat_free_clusters(file_num[fd].full_first_cluster);
-  file_num[fd].flags = FAT_FLAG_OPEN;           // make sure that there are no dirty flags
+  fat_delete(fd, rerrno);
   
   fat_close(fd, rerrno);
   return 0;
@@ -1651,11 +1662,13 @@ int fat_rmdir(const char *path, int *rerrno) {
     }
   }
   
+  fat_delete(f_dir, rerrno);
+  
   if(fat_close(f_dir, rerrno)) {
     return -1;
   }
   // no entries found, delete it
-  return fat_unlink(path, rerrno);
+  return 0;//fat_unlink(path, rerrno);
 }
 
 int fat_mkdir(const char *path, int mode __attribute__((__unused__)), int *rerrno) {
@@ -1741,12 +1754,15 @@ int fat_mkdir(const char *path, int mode __attribute__((__unused__)), int *rerrn
     return -1;
   }
   // write a new directory entry
-  for(i=0;i<11;i++) {
+  for(i=0;i<8;i++) {
     if((i < 8) && (i < (int)strlen(dosname))) {
       d.filename[i] = dosname[i];
     } else {
       d.filename[i] = ' ';
     }
+  }
+  for(i=0;i<3;i++) {
+      d.extension[i] = ' ';
   }
   d.attributes = FAT_ATT_SUBDIR | FAT_ATT_ARC;
   d.reserved = 0x00;
@@ -1787,8 +1803,11 @@ int fat_mkdir(const char *path, int mode __attribute__((__unused__)), int *rerrn
   }
   
   d.filename[0] = '.';
-  for(i=1;i<11;i++) {
+  for(i=1;i<8;i++) {
     d.filename[i] = ' ';
+  }
+  for(i=0;i<3;i++) {
+    d.extension[i] = ' ';
   }
   d.attributes = FAT_ATT_SUBDIR | FAT_ATT_ARC;
   d.reserved = 0x00;
