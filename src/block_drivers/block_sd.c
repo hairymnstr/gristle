@@ -203,6 +203,7 @@ int sd_card_reset() {
     card.size += (c << 8);
     c = spi_xfer(SD_SPI, 0xFF);
     card.size += c;      /* last byte of size */
+    card.size += 1;      /* size is (csize + 1) * 512 bytes */
     card.size <<= 10;    /* want it in 512 blocks but was in 512k */
     spi_xfer(SD_SPI, 0xFF);   /* always 0x7F */
     spi_xfer(SD_SPI, 0xFF);   /* always 0x80 */
@@ -248,8 +249,8 @@ int sd_card_reset() {
 
 int block_init() {
   /* need to do the clocks */
-  rcc_peripheral_enable_clock(&SD_SPI_APB, SD_RCC_SPI);
-  rcc_peripheral_enable_clock(&SD_IO_APB, SD_RCC_IO);
+  rcc_peripheral_enable_clock(&SD_SPI_APB_ENR, SD_SPI_ENR_BIT);
+  rcc_peripheral_enable_clock(&SD_IO_APB_ENR, SD_IO_ENR_BIT);
 
     /* need to do the IO pins */
   gpio_set_mode(SD_PORT, GPIO_MODE_OUTPUT_50_MHZ,
@@ -318,10 +319,45 @@ int block_read(blockno_t block, void *buf) {
 }
 
 int block_write(blockno_t block, void *buf) {
+  int i;
+  uint16_t c;
+  uint8_t *bp = buf;
+  
+  if(card.card_type == SD_CARD_SC) {
+    block <<= 9;
+  }
+
+  c = sd_command(CMD24, block, 1);
+
+  if(c != 0) {
+    return c;
+  }
+  
+  // make sure there's long enough from the command response before the data
+  spi_xfer(SD_SPI, 0xFF);
+  spi_xfer(SD_SPI, 0xFF);
+  
+  //now send the start of block indicator
+  spi_xfer(SD_SPI, 0xFE);
+  
+  // now the data
+  for(i=0;i<512;i++) {
+    spi_xfer(SD_SPI, *bp++);
+  }
+  
+  // finally two dummy checksum bytes
+  spi_xfer(SD_SPI, 0xFF);
+  spi_xfer(SD_SPI, 0xFF);   /* read checksum bytes and dispose of */
+  
+  // get the card response
+  c = spi_xfer(SD_SPI, 0xFF);
+  
+  while(spi_xfer(SD_SPI, 0xFF) != 0xFF) {__asm__("nop");}     // make sure the card is no longer busy
+
   return 0;
 }
 
-int block_get_volume_size() {
+blockno_t block_get_volume_size() {
   return card.size;
 }
 
