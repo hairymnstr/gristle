@@ -50,6 +50,7 @@
 #define CMD12         12
 #define CMD17         17
 #define CMD18         18
+#define CMD24         24
 #define ACMD41        0x80 + 41
 
 /* Error status codes returned in the SD info struct */
