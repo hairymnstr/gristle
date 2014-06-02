@@ -249,8 +249,8 @@ int sd_card_reset() {
 
 int block_init() {
   /* need to do the clocks */
-  rcc_peripheral_enable_clock(&SD_SPI_APB_ENR, SD_SPI_ENR_BIT);
-  rcc_peripheral_enable_clock(&SD_IO_APB_ENR, SD_IO_ENR_BIT);
+  rcc_peripheral_enable_clock(&SD_SPI_APB_ENR, SD_SPI_APB_ENR_BIT);
+  rcc_peripheral_enable_clock(&SD_IO_APB_ENR, SD_IO_APB_ENR_BIT);
 
     /* need to do the IO pins */
   gpio_set_mode(SD_PORT, GPIO_MODE_OUTPUT_50_MHZ,
