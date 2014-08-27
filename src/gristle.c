@@ -124,6 +124,9 @@ uint16_t fat_from_unix_date(time_t seconds) {
  * so no flush is required on the meta info for this file.
  */
 int fat_update_atime(int fd) {
+#ifdef GRISTLE_RO
+    (void)fd;
+#else
   uint16_t new_date, old_date;
   new_date = fat_from_unix_date(GRISTLE_TIME);
   old_date = fat_from_unix_date(file_num[fd].accessed);
@@ -132,7 +135,7 @@ int fat_update_atime(int fd) {
     file_num[fd].accessed = GRISTLE_TIME;
     file_num[fd].flags |= FAT_FLAG_FS_DIRTY;
   }
-  
+#endif
   return 0;
 }
 
@@ -143,8 +146,12 @@ int fat_update_atime(int fd) {
  * so to reduce overheads, the date is just set and the fs_dirty flag set.
  */
 int fat_update_mtime(int fd) {
+#ifdef GRISTLE_RO
+    (void)fd;
+#else
   file_num[fd].modified = GRISTLE_TIME;
   file_num[fd].flags |= FAT_FLAG_FS_DIRTY;
+#endif
   return 0;
 }
 
@@ -447,6 +454,9 @@ int fat_free_clusters(uint32_t cluster) {
 
 /* write a sector back to disc */
 int fat_flush(int fd) {
+#ifdef GRISTLE_RO
+    (void)fd;
+#else
   uint32_t cluster;
 #ifdef TRACE
   printf("fat_flush\n");
@@ -487,6 +497,7 @@ int fat_flush(int fd) {
       file_num[fd].flags &= ~FAT_FLAG_DIRTY;
     }
   }
+#endif
   return 0;
 }
 
@@ -627,6 +638,9 @@ int fat_next_sector(int fd) {
 
 /* Function to save file meta-info, (size modified date etc.) */
 int fat_flush_fileinfo(int fd) {
+#ifdef GRISTLE_RO
+    (void)fd;
+#else
   direntS de;
   direntS *de2;
   int i;
@@ -725,6 +739,7 @@ int fat_flush_fileinfo(int fd) {
   if(block_read(file_num[fd].sector, file_num[fd].buffer)) {
     return -1;
   }
+#endif
   /* mark the filesystem as consistent now */
   file_num[fd].flags &= ~FAT_FLAG_FS_DIRTY;
   return 0;
@@ -1592,7 +1607,7 @@ int fat_mkdir(const char *path __attribute__((__unused__)), int mode __attribute
  * Can be used to remove any entry, does no checking for empty directories etc.
  * Should be called on files by unlink() and on empty directories by rmdir()
  **/
-int fat_delete(int fd, int *rerrno) {
+int fat_delete(int fd, int *rerrno __attribute__((__unused__))) {
     // remove the directory entry
     // in fat this just means setting the first character of the filename to 0xe5
     block_read(file_num[fd].entry_sector, file_num[fd].buffer);
