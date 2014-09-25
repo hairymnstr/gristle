@@ -119,6 +119,7 @@ struct ext2_dirent {
 };
 
 struct file_ent {
+  struct ext2context *context;
   uint32_t flags;
   uint32_t cursor;
   uint32_t inode_number;
@@ -132,16 +133,20 @@ struct file_ent {
 
 int ext2_mount(blockno_t part_start, blockno_t volume_size, uint8_t filesystem_hint, struct ext2context **context);
 
-struct file_ent *ext2_open(const char *name, int flags, int mode, int *rerrno, struct ext2context *context);
+struct file_ent *ext2_open(struct ext2context *context, const char *name, int flags, int mode, int *rerrno);
 
-int ext2_close(struct file_ent *fe, int *rerrno, struct ext2context *context);
+int ext2_close(struct file_ent *fe, int *rerrno);
 
-int ext2_read(struct file_ent *fe, void *buffer, size_t count, int *rerrno, struct ext2context *context);
+int ext2_read(struct file_ent *fe, void *buffer, size_t count, int *rerrno);
 
-int ext2_fstat(struct file_ent *fe, struct stat *st, int *rerrno, struct ext2context *context);
+int ext2_write(struct file_ent *fe, const void *buffer, size_t count, int *rerrno);
 
-int ext2_lseek(struct file_ent *fe, int ptr, int dir, int *rerrno, struct ext2context *context);
+int ext2_isatty(struct file_ent *fe, int *rerrno);
 
-struct dirent *ext2_readdir(struct file_ent *fe, int *rerrno, struct ext2context *context);
+int ext2_fstat(struct file_ent *fe, struct stat *st, int *rerrno);
+
+int ext2_lseek(struct file_ent *fe, int ptr, int dir, int *rerrno);
+
+struct dirent *ext2_readdir(struct file_ent *fe, int *rerrno);
 
 #endif /* ifndef EMBEXT2_H */

@@ -30,6 +30,9 @@
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
+#ifdef EXT_DEBUG
+#include <inttypes.h>
+#endif
 #include <stdlib.h>
 #include <stdint.h>
 #include <time.h>
@@ -39,105 +42,140 @@
 #include "partition.h"
 #include "embext.h"
 
-int ext2_flush(struct file_ent *fe, struct ext2context *context) {
+#ifdef EXT_DEBUG
+void ext2_print_inode(struct inode *in) {
+    int i;
+    printf("i_mode = %" PRIu16 "\n", in->i_mode);
+    printf("i_uid = %" PRIu16 "\n", in->i_uid);
+    printf("i_size = %" PRIu32 "\n", in->i_size);
+    printf("i_atime = %" PRIu32 "\n", in->i_atime);
+    printf("i_ctime = %" PRIu32 "\n", in->i_ctime);
+    printf("i_mtime = %" PRIu32 "\n", in->i_mtime);
+    printf("i_dtime = %" PRIu32 "\n", in->i_dtime);
+    printf("i_gid = %" PRIu16 "\n", in->i_gid);
+    printf("i_links_count = %" PRIu16 "\n", in->i_links_count);
+    printf("i_blocks = %" PRIu32 "\n", in->i_blocks);
+    printf("i_flags = %" PRIu32 "\n", in->i_flags);
+    printf("i_osd1 = %" PRIu32 "\n", in->i_osd1);
+    printf("i_block = [\n");
+    for(i=0;i<15;i++) {
+        printf("  %" PRIu32 ",\n", in->i_block[i]);
+    }
+    printf("  ]\n");
+    printf("i_generation = %" PRIu32 "\n", in->i_generation);
+    printf("i_file_acl = %" PRIu32 "\n", in->i_file_acl);
+    printf("i_dir_acl = %" PRIu32 "\n", in->i_dir_acl);
+    printf("i_faddr = %" PRIu32 "\n", in->i_faddr);
+    printf("i_osd2 = \"");
+    for(i=0;i<12;i++) {
+        if((in->i_osd2[i] < ' ') || (in->i_osd2[i] > '~')) {
+            printf("\\x%02x", in->i_osd2[i]);
+        } else {
+            printf("%c", in->i_osd2[i]);
+        }
+    }
+    printf("\"\n");
+}
+#endif
 
-//   if(fe->flags & EXT2_FLAG_DIRTY) {
-//     if(fe->sector == 0) {
-//       // new file
-//       printf("New file, not supported.\r\n");
-//     } else {
-//       if(block_write(fe->sector, fe->buffer)) {
-//         return -1;
-//       }
-//       fe->flags &= ~EXT2_FLAG_DIRTY;
-//     }
-//   }
+int ext2_flush(struct file_ent *fe) {
+  if(fe->flags & EXT2_FLAG_DIRTY) {
+    if(fe->sector == 0) {
+      // new file
+      printf("New file, not supported.\r\n");
+    } else {
+      if(block_write(fe->sector, fe->buffer)) {
+        return -1;
+      }
+      fe->flags &= ~EXT2_FLAG_DIRTY;
+    }
+  }
   return 0;
 }
 
-int ext2_flush_inode(struct file_ent *fe, struct ext2context *context) {
-//   uint32_t inode_block;
-//   uint32_t block_group = (fe->inode_number - 1) / context->superblock.s_inodes_per_group;
-//   uint32_t inode_index = (fe->inode_number - 1) % context->superblock.s_inodes_per_group;
-//   // now load the block group descriptor for that block group
-//   uint32_t bg_block = context->superblock_block + 1;
-//   struct block_group_descriptor *block_table;
-// 
-//   if(fe->flags & EXT2_FLAG_FS_DIRTY) {
-//     ext2_flush(fe, context);
-//     //find the inode
-//   
-//     bg_block <<= (context->superblock.s_log_block_size + 1);
-//     bg_block += ((block_group * 32) / block_get_block_size());
-//     
-//     block_read(bg_block + context->part_start, context->sysbuf);
-//     
-//     block_table = (struct block_group_descriptor *)&context->sysbuf[(block_group * 32) % block_get_block_size()];
-//     
-//     inode_block = block_table->bg_inode_table;
-//     inode_block <<= (context->superblock.s_log_block_size + 1);
-//     
-//     inode_block += (inode_index >> 2);
-//     
-//     // load the sector
-//     block_read(inode_block + context->part_start, context->sysbuf);
-//     
-//     memcpy(&context->sysbuf[context->superblock.s_inode_size * (inode_index % (block_get_block_size() / context->superblock.s_inode_size))], &fe->inode, sizeof(struct inode));
-//     
-//     // write the sector
-//     block_write(inode_block + context->part_start, fe->buffer);
-//     
-//     fe->flags &= ~EXT2_FLAG_FS_DIRTY;
-//   }
+int ext2_flush_inode(struct file_ent *fe) {
+  uint32_t inode_block;
+  uint32_t block_group = (fe->inode_number - 1) / fe->context->superblock.s_inodes_per_group;
+  uint32_t inode_index = (fe->inode_number - 1) % fe->context->superblock.s_inodes_per_group;
+  // now load the block group descriptor for that block group
+  uint32_t bg_block = fe->context->superblock_block + 1;
+  struct block_group_descriptor *block_table;
+
+  if(fe->flags & EXT2_FLAG_FS_DIRTY) {
+    ext2_flush(fe);
+    //find the inode
+  
+    bg_block <<= (fe->context->superblock.s_log_block_size + 1);
+    bg_block += ((block_group * 32) / block_get_block_size());
+    
+    block_read(bg_block + fe->context->part_start, fe->context->sysbuf);
+    
+    block_table = (struct block_group_descriptor *)&fe->context->sysbuf[(block_group * 32) % block_get_block_size()];
+    
+    inode_block = block_table->bg_inode_table;
+    inode_block <<= (fe->context->superblock.s_log_block_size + 1);
+    
+    inode_block += (inode_index / (block_get_block_size() / fe->context->superblock.s_inode_size));
+    
+    // load the sector
+    block_read(inode_block + fe->context->part_start, fe->context->sysbuf);
+    
+    memcpy(&fe->context->sysbuf[(inode_index % (block_get_block_size() / fe->context->superblock.s_inode_size)) * fe->context->superblock.s_inode_size], &fe->inode, sizeof(struct inode));
+    
+    // write the sector
+    block_write(inode_block + fe->context->part_start, fe->context->sysbuf);
+    
+    fe->flags &= ~EXT2_FLAG_FS_DIRTY;
+  }
   
   return 0;
 }
 
-int ext2_update_atime(struct file_ent *fe, struct ext2context *context) {
+int ext2_update_atime(struct file_ent *fe) {
   fe->inode.i_atime = time(NULL);
   fe->flags |= EXT2_FLAG_FS_DIRTY;
   return 0;
 }
 
-int ext2_update_mtime(struct file_ent *fe, struct ext2context *context) {
+int ext2_update_mtime(struct file_ent *fe) {
   fe->inode.i_mtime = time(NULL);
   fe->flags |= EXT2_FLAG_FS_DIRTY;
   return 0;
 }
 
-int ext2_open_inode(struct file_ent *fe, int inode, struct ext2context *context) {
+int ext2_open_inode(struct file_ent *fe, int inode) {
   struct block_group_descriptor *block_table;
   uint32_t inode_block;
-  uint32_t block_group = (inode - 1) / context->superblock.s_inodes_per_group;
-  uint32_t inode_index = (inode - 1) % context->superblock.s_inodes_per_group;
+  uint32_t block_group = (inode - 1) / fe->context->superblock.s_inodes_per_group;
+  uint32_t inode_index = (inode - 1) % fe->context->superblock.s_inodes_per_group;
   // now load the block group descriptor for that block group
-  uint32_t bg_block = context->superblock_block + 1;
+  uint32_t bg_block = fe->context->superblock_block + 1;
   
-  bg_block <<= (context->superblock.s_log_block_size + 1);
+  bg_block <<= (fe->context->superblock.s_log_block_size + 1);
   
   bg_block += ((block_group * 32) / block_get_block_size());
   
-  block_read(bg_block + context->part_start, context->sysbuf);
+  block_read(bg_block + fe->context->part_start, fe->context->sysbuf);
   
-  block_table = (struct block_group_descriptor *)&context->sysbuf[(block_group * 32) % block_get_block_size()];
+  block_table = (struct block_group_descriptor *)&fe->context->sysbuf[(block_group * 32) % block_get_block_size()];
   
   inode_block = block_table->bg_inode_table;
   
-  inode_block <<= (context->superblock.s_log_block_size + 1);
+  inode_block <<= (fe->context->superblock.s_log_block_size + 1);
   
-  inode_block += (inode_index / (block_get_block_size() / context->superblock.s_inode_size));
+  inode_block += (inode_index / (block_get_block_size() / fe->context->superblock.s_inode_size));
   
-  block_read(inode_block + context->part_start, context->sysbuf);
+  block_read(inode_block + fe->context->part_start, fe->context->sysbuf);
   
-  memcpy(&fe->inode, &context->sysbuf[(inode_index % (block_get_block_size() / context->superblock.s_inode_size)) * context->superblock.s_inode_size], sizeof(struct inode));
+  memcpy(&fe->inode, &fe->context->sysbuf[(inode_index % (block_get_block_size() / fe->context->superblock.s_inode_size)) * fe->context->superblock.s_inode_size], sizeof(struct inode));
   
-  block_read((fe->inode.i_block[0] << (context->superblock.s_log_block_size + 1)) + context->part_start, fe->buffer);
+  block_read((fe->inode.i_block[0] << (fe->context->superblock.s_log_block_size + 1)) + fe->context->part_start, fe->buffer);
   fe->inode_number = inode;
   fe->flags = EXT2_FLAG_READ;
   fe->cursor = 0;
-  fe->sector = (fe->inode.i_block[0] << (context->superblock.s_log_block_size + 1)) + context->part_start;
+  fe->sector = (fe->inode.i_block[0] << (fe->context->superblock.s_log_block_size + 1)) + fe->context->part_start;
   fe->file_sector = 0;
-  fe->sectors_left = (1 << (context->superblock.s_log_block_size + 1)) - 1;
+  fe->sectors_left = (1 << (fe->context->superblock.s_log_block_size + 1)) - 1;
   fe->block_index[0] = 0;
   fe->block_index[1] = 0;
   fe->block_index[2] = 0;
@@ -145,7 +183,7 @@ int ext2_open_inode(struct file_ent *fe, int inode, struct ext2context *context)
   return 0;
 }
 
-int ext2_lookup_path(struct file_ent *fe, const char *path, int *rerrno, struct ext2context *context) {
+int ext2_lookup_path(struct file_ent *fe, const char *path, int *rerrno) {
   char local_path[MAX_PATH_LEN];
   char *elements[MAX_PATH_LEVELS];
   int levels = 0;
@@ -165,13 +203,13 @@ int ext2_lookup_path(struct file_ent *fe, const char *path, int *rerrno, struct 
   }
   
   for(i=0;i<levels;i++) {
-    ext2_open_inode(fe, ino, context);
-    de = ext2_readdir(fe, rerrno, context);
+    ext2_open_inode(fe, ino);
+    de = ext2_readdir(fe, rerrno);
     while(de != NULL) {
       if(strcmp(de->d_name, elements[i]) == 0) {
         break;
       }
-      de = ext2_readdir(fe, rerrno, context);
+      de = ext2_readdir(fe, rerrno);
     }
     if(de == NULL) {
       *rerrno = ENOENT;
@@ -181,16 +219,16 @@ int ext2_lookup_path(struct file_ent *fe, const char *path, int *rerrno, struct 
   }
 
   // right, ino is now the inode of the target file/directory
-  return ext2_open_inode(fe, ino, context);
+  return ext2_open_inode(fe, ino);
 }
 
-int ext2_next_block(struct file_ent *fe, struct ext2context *context) {
+int ext2_next_block(struct file_ent *fe) {
   
   if(fe->block_index[0] < 11) {
     fe->block_index[0]++;
     if(fe->inode.i_block[fe->block_index[0]] > 0) {
-      fe->sectors_left = ((1 << (10 + context->superblock.s_log_block_size)) / block_get_block_size()) - 1;
-      fe->sector = (fe->inode.i_block[fe->block_index[0]] << (context->superblock.s_log_block_size + 1)) + context->part_start;
+      fe->sectors_left = ((1 << (10 + fe->context->superblock.s_log_block_size)) / block_get_block_size()) - 1;
+      fe->sector = (fe->inode.i_block[fe->block_index[0]] << (fe->context->superblock.s_log_block_size + 1)) + fe->context->part_start;
       fe->cursor = 0;
       fe->file_sector++;
       return block_read(fe->sector, fe->buffer);
@@ -204,7 +242,7 @@ int ext2_next_block(struct file_ent *fe, struct ext2context *context) {
   return 0;
 }
 
-int ext2_next_sector(struct file_ent *fe, struct ext2context *context) {
+int ext2_next_sector(struct file_ent *fe) {
   if(fe->sectors_left > 0) {
     block_read(++fe->sector, fe->buffer);
     fe->sectors_left--;
@@ -212,7 +250,7 @@ int ext2_next_sector(struct file_ent *fe, struct ext2context *context) {
     fe->file_sector++;
     return 0;
   }
-  return ext2_next_block(fe, context);
+  return ext2_next_block(fe);
 }
 
 /**
@@ -344,17 +382,17 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
   return 0;
 }
 
-struct file_ent *ext2_open(const char *name, int flags, int mode, 
-                           int *rerrno, struct ext2context *context) {
+struct file_ent *ext2_open(struct ext2context *context, const char *name, int flags, int mode, 
+                           int *rerrno) {
   int i;
   struct file_ent *fe = (struct file_ent *)malloc(sizeof(struct file_ent));
   if(fe == NULL) {
     (*rerrno) = ENOMEM;
     return NULL;
   }
-  (*rerrno) = 0;
   memset(fe, 0, sizeof(struct file_ent));
-  i = ext2_lookup_path(fe, name, rerrno, context);
+  fe->context = context;
+  i = ext2_lookup_path(fe, name, rerrno);
   if((flags & O_RDWR)) {
     fe->flags |= (EXT2_FLAG_READ | EXT2_FLAG_WRITE);
   } else {
@@ -378,7 +416,7 @@ struct file_ent *ext2_open(const char *name, int flags, int mode,
     } else {
       /* opening a new file for writing */
       /* only create files in directories that aren't read only */
-      if(context->read_only) {
+      if(fe->context->read_only) {
         free(fe);
         (*rerrno) = EROFS;
         return NULL;
@@ -406,7 +444,7 @@ struct file_ent *ext2_open(const char *name, int flags, int mode,
         return fe;
       } else {
         /* file opened for write access, check permissions */
-        if(context->read_only) {
+        if(fe->context->read_only) {
           /* requested write on read only filesystem */
           free(fe);
           (*rerrno) = EROFS;
@@ -451,20 +489,19 @@ struct file_ent *ext2_open(const char *name, int flags, int mode,
   }
 }
 
-int ext2_close(struct file_ent *fe, int *rerrno, struct ext2context *context) {
-  (*rerrno) = 0;
+int ext2_close(struct file_ent *fe, int *rerrno) {
   if(fe == NULL) {
     (*rerrno) = EBADF;
     return -1;
   }
   if(fe->flags & EXT2_FLAG_DIRTY) {
-    if(ext2_flush(fe, context)) {
+    if(ext2_flush(fe)) {
       (*rerrno) = EIO;
       return -1;
     }
   }
   if(fe->flags & EXT2_FLAG_FS_DIRTY) {
-    if(ext2_flush_inode(fe, context)) {
+    if(ext2_flush_inode(fe)) {
       (*rerrno) = EIO;
       return -1;
     }
@@ -474,11 +511,10 @@ int ext2_close(struct file_ent *fe, int *rerrno, struct ext2context *context) {
   return 0;
 }
 
-int ext2_read(struct file_ent *fe, void *buffer, size_t count, int *rerrno, struct ext2context *context) {
+int ext2_read(struct file_ent *fe, void *buffer, size_t count, int *rerrno) {
   uint32_t i=0;
   uint8_t *bt = (uint8_t *)buffer;
-  /* make sure this is an open file and it can be read */
-  (*rerrno) = 0;
+  /* make sure this is an open file and it can be read */  
   if(fe == NULL) {
     (*rerrno) = EBADF;
     return -1;
@@ -486,37 +522,37 @@ int ext2_read(struct file_ent *fe, void *buffer, size_t count, int *rerrno, stru
   /* copy some bytes to the buffer requested */
   while(i < count) {
     if(((fe->cursor + fe->file_sector * block_get_block_size())) >= fe->inode.i_size) {
-//       printf("eof\n");
       break;   /* end of file */
     }
     *bt++ = *(uint8_t *)(fe->buffer + fe->cursor);
     fe->cursor++;
     if(fe->cursor == block_get_block_size()) {
-      ext2_next_sector(fe, context);
+      ext2_next_sector(fe);
     }
     i++;
   }
   if(i > 0) {
-    ext2_update_atime(fe, context);
+    ext2_update_atime(fe);
   }
   return i;
 }
 
 int ext2_write(struct file_ent *fe, const void *buffer, size_t count, 
-               int *rerrno, struct ext2context *context) {
+               int *rerrno) {
   uint32_t i=0;
   uint8_t *bt = (uint8_t *)buffer;
-  (*rerrno) = 0;
   if(fe == NULL) {
     (*rerrno) = EBADF;
     return -1;
   }
-  if((~fe->flags) & (EXT2_FLAG_OPEN | EXT2_FLAG_WRITE)) {
+  if(!(fe->flags & EXT2_FLAG_WRITE)) {
     (*rerrno) = EBADF;
     return -1;
   }
   if(fe->flags & EXT2_FLAG_APPEND) {
-    ext2_lseek(fe, 0, SEEK_END, rerrno, context);
+    if(ext2_lseek(fe, 0, SEEK_END, rerrno) == -1) {
+        return -1;
+    }
   }
   while(i < count) {
     if(((fe->cursor + fe->file_sector * 512)) == fe->inode.i_size) {
@@ -526,7 +562,7 @@ int ext2_write(struct file_ent *fe, const void *buffer, size_t count,
     fe->buffer[fe->cursor] = *bt++;
     fe->cursor++;
     if(fe->cursor == 512) {
-      if(ext2_next_sector(fe, context)) {
+      if(ext2_next_sector(fe)) {
         (*rerrno) = EIO;
         return -1;
       }
@@ -534,13 +570,13 @@ int ext2_write(struct file_ent *fe, const void *buffer, size_t count,
     i++;
   }
   if(i > 0) {
-    ext2_update_mtime(fe, context);
+    ext2_update_mtime(fe);
   }
   return i;
 }
 
 int ext2_fstat(struct file_ent *fe, struct stat *st, 
-               int *rerrno, struct ext2context *context) {
+               int *rerrno) {
   (*rerrno) = 0;
   if(fe == NULL) {
     (*rerrno) = EBADF;
@@ -558,16 +594,16 @@ int ext2_fstat(struct file_ent *fe, struct stat *st,
   st->st_atime = fe->inode.i_atime;
   st->st_mtime = fe->inode.i_mtime;
   st->st_ctime = fe->inode.i_ctime;
-  st->st_blksize = 1 << (context->superblock.s_log_block_size + 10);
-  st->st_blocks = (fe->inode.i_size / (1 << (context->superblock.s_log_block_size + 10)));  /* number of blocks allocated for this object */
-  if(fe->inode.i_size % (1 << (context->superblock.s_log_block_size + 10))) {
+  st->st_blksize = 1 << (fe->context->superblock.s_log_block_size + 10);
+  st->st_blocks = (fe->inode.i_size / (1 << (fe->context->superblock.s_log_block_size + 10)));  /* number of blocks allocated for this object */
+  if(fe->inode.i_size % (1 << (fe->context->superblock.s_log_block_size + 10))) {
     st->st_blocks++;
   }
   return 0; 
 }
 
 int ext2_lseek(struct file_ent *fe, int ptr, int dir,
-               int *rerrno, struct ext2context *context) {
+               int *rerrno) {
   unsigned int new_pos;
   unsigned int old_pos;
   int new_sec;
@@ -601,9 +637,9 @@ int ext2_lseek(struct file_ent *fe, int ptr, int dir,
     // case 1: seekin  (*rerrno) = 0;
     fe->cursor = new_pos % block_get_block_size();
     return new_pos;
-  } else if((new_pos / (1 << (context->superblock.s_log_block_size + 10))) == (old_pos / (1 << (context->superblock.s_log_block_size + 10)))) {
+  } else if((new_pos / (1 << (fe->context->superblock.s_log_block_size + 10))) == (old_pos / (1 << (fe->context->superblock.s_log_block_size + 10)))) {
     // case 2: seeking within the cluster, just need to hop forward/back some sectors
-    ext2_flush(fe, context);       // need to flush before loading a new sector
+    ext2_flush(fe);       // need to flush before loading a new sector
     fe->file_sector = new_pos / block_get_block_size();
     fe->sector = fe->sector + (new_pos/block_get_block_size()) - (old_pos/block_get_block_size());
     fe->sectors_left = fe->sectors_left + (new_pos/block_get_block_size()) - (old_pos/block_get_block_size());
@@ -613,9 +649,9 @@ int ext2_lseek(struct file_ent *fe, int ptr, int dir,
     }
     return new_pos;
   }
-  ext2_flush(fe, context);
+  ext2_flush(fe);
   // otherwise we need to seek the cluster chain
-  block = new_pos / (1 << (context->superblock.s_log_block_size + 10));
+  block = new_pos / (1 << (fe->context->superblock.s_log_block_size + 10));
   
   if(block > 11) {
     printf("Uh oh, indirect block :(\r\n");
@@ -625,10 +661,10 @@ int ext2_lseek(struct file_ent *fe, int ptr, int dir,
   
   fe->file_sector = new_pos / block_get_block_size();
   fe->cursor = new_pos % block_get_block_size();
-  new_sec = new_pos - block * (1 << (context->superblock.s_log_block_size + 10));
+  new_sec = new_pos - block * (1 << (fe->context->superblock.s_log_block_size + 10));
   new_sec = new_sec / block_get_block_size();
-  fe->sector = fe->inode.i_block[fe->block_index[0]] * (1 << (context->superblock.s_log_block_size + 1)) + context->part_start + new_sec;
-  fe->sectors_left = (1 << (context->superblock.s_log_block_size + 1)) - new_sec - 1;
+  fe->sector = fe->inode.i_block[fe->block_index[0]] * (1 << (fe->context->superblock.s_log_block_size + 1)) + fe->context->part_start + new_sec;
+  fe->sectors_left = (1 << (fe->context->superblock.s_log_block_size + 1)) - new_sec - 1;
   if(block_read(fe->sector, fe->buffer)) {
     return ptr-1;
 //     iprintf("Bad block read 2.\r\n");
@@ -636,35 +672,39 @@ int ext2_lseek(struct file_ent *fe, int ptr, int dir,
   return new_pos;
 }
 
-struct dirent *ext2_readdir(struct file_ent *fe, int *rerrno, struct ext2context *context) {
+int ext2_isatty(struct file_ent *fe, int *rerrno) {
+    if(fe == NULL) {
+        *rerrno = EBADF;
+    } else {
+        *rerrno = ENOTTY;
+    }
+    return 0;
+}
+
+struct dirent *ext2_readdir(struct file_ent *fe, int *rerrno) {
   uint16_t rec_len;
   uint8_t name_len;
   uint8_t file_type;
   static struct dirent de;
   
-  if(ext2_read(fe, &de.d_ino, 4, rerrno, context) < 4) {
+  if(ext2_read(fe, &de.d_ino, 4, rerrno) < 4) {
     return NULL;
   }
-  if(ext2_read(fe, &rec_len, 2, rerrno, context) < 2) {
+  if(ext2_read(fe, &rec_len, 2, rerrno) < 2) {
     return NULL;
   }
-  if(ext2_read(fe, &name_len, 1, rerrno, context) < 1) {
+  if(ext2_read(fe, &name_len, 1, rerrno) < 1) {
     return NULL;
   }
-  if(ext2_read(fe, &file_type, 1, rerrno, context) < 1) {
+  if(ext2_read(fe, &file_type, 1, rerrno) < 1) {
     return NULL;
   }
-  
-//   printf("d_ino: %d\n", de.d_ino);
-//   printf("rec_len: %d\n", rec_len);
-//   printf("name_len: %d\n", name_len);
-//   printf("file_type: %d\n", file_type);
   
   if(de.d_ino > 0) {
-    ext2_read(fe, de.d_name, name_len, rerrno, context);
+    ext2_read(fe, de.d_name, name_len, rerrno);
     de.d_name[name_len] = 0;
   
-    ext2_lseek(fe, rec_len - 8 - name_len, SEEK_CUR, rerrno, context);
+    ext2_lseek(fe, rec_len - 8 - name_len, SEEK_CUR, rerrno);
     return &de;
   } else {
     return NULL;
