@@ -113,6 +113,9 @@ struct ext2context {
     uint8_t sysbuf[512];
     uint32_t superblock_block;
     uint32_t read_only;
+    uint32_t num_blockgroups;
+    uint32_t num_superblocks;
+    uint32_t *superblock_blocks;
 };
 
 struct ext2_dirent {

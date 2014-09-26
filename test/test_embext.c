@@ -79,7 +79,11 @@ int main(int argc, char *argv[]) {
   
   ext2_print_bg1_bitmap(context);
   
+  ext2_umount(context);
+  
   block_pc_snapshot_all("writenfs.img");
+  
+  block_halt();
   
   exit(0);
 }

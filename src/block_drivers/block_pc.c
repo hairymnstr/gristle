@@ -37,14 +37,10 @@
 uint64_t block_fs_size=0;
 uint8_t *blocks = NULL;
 int block_ro;
-char *image_name = NULL;
+static const char *image_name = NULL;
 
-void block_pc_set_image_name(char *filename) {
-    if(image_name) {
-        free(image_name);
-    }
-    image_name = (char *)malloc(strlen(filename) + 1);
-    strcpy(image_name, filename);
+void block_pc_set_image_name(const char * const filename) {
+    image_name = filename;
     return;
 }
 

@@ -29,7 +29,7 @@
 #ifndef BLOCK_PC_H
 #define BLOCK_PC_H 1
 
-void block_pc_set_image_name(char *filename);
+void block_pc_set_image_name(const char * const filename);
 void block_pc_set_ro();
 void block_pc_set_rw();
 int block_pc_snapshot(const char *filename, uint64_t start, uint64_t len);

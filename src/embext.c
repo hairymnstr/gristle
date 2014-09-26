@@ -191,6 +191,208 @@ int ext2_flush_inode(struct file_ent *fe) {
     return 0;
 }
 
+int ext2_flush_superblock(struct ext2context *context) {
+    int i;
+    
+    memset(context->sysbuf, 0, block_get_block_size());
+    for(i=0;i<context->num_superblocks;i++) {
+        context->superblock.s_block_group_nr = context->superblock_blocks[i];
+        memcpy(context->sysbuf, &context->superblock, sizeof(struct superblock));
+        block_write((context->superblock_blocks[i] << (context->superblock.s_log_block_size + 1)) + context->part_start, context->sysbuf);
+    }
+    return 0;
+}
+
+/**
+ * \brief fetches a block group descriptor from disk.
+ * 
+ * Block group descriptors contain the block number of the inode and block bitmaps and a count of
+ * the free blocks and inodes in the block group.  This call uses the sysbuf.  The block group
+ * descriptor is always read from the primary table, immediately after the first superblock.
+ * 
+ * \param context The ext2 filesystem context for the mounted volume.
+ * \param bg A pointer to a struct to store the block group descriptor that's been requested.
+ * \param block_group The number of the block group to fetch the descriptor for.
+ * \returns 0 on success, -1 on error
+ **/
+int ext2_get_bg_descriptor(struct ext2context *context, 
+                           struct block_group_descriptor *bg, 
+                           uint32_t block_group) {
+    if(block_group >= context->num_blockgroups) {
+        return -1;
+    }
+    
+    // block group table always starts immediately after the superblock
+    lba_block = context->superblock_block + 1;
+
+    // the table is contiguous so convert to disk blocks here
+    lba_block <<= (context->superblock.s_log_block_size + 1);
+    
+    // now find the disk-block offset
+    lba_block += (block_group / (512 / 32));
+    
+    block_read(lba_block + context->part_start, context->sysbuf);
+    
+    // copy the appropriate chunk from the buffer
+    memcpy(bg, 
+           &context->sysbuf[32 * (block_group % (512 / 32))], 
+           sizeof(struct block_group_descriptor));
+    
+    return 0;
+}
+
+/**
+ * \brief Store a block group descriptor to disk.
+ * 
+ * Block group descriptors have a count of free blocks and inodes within the strorage group they
+ * describe.  After an allocation the block group descriptor must therefore be written back to the
+ * disk.  This call uses sysbuf.  This call will write copies back to every backup of the block
+ * group descriptor table on the disk.
+ * 
+ * \param context The ext2 filesystem context for the mounted partition.
+ * \param bg A pointer to the block group descriptor struct to be stored.
+ * \param block_group The block group number this descriptor belongs to.
+ * \return 0 on success, -1 on failure.
+ **/
+int ext2_write_bg_descriptor(struct ext2context *context,
+                             struct block_group_descriptor *bg,
+                             uint32_t block_group) {
+    if(block_group >= context->num_blockgroups) {
+        return -1;
+    }
+    
+    for(i=0;i<context->num_superblocks;i++) {
+        // get the block number of the start of the descriptor table
+        lba_block = context->superblock_blocks[i] + 1;
+        
+        // convert to lba disk blocks
+        lba_block <<= (context->superblock.s_log_block_size + 1);
+        
+        // step along to the disk block containing this descriptor
+        lba_block += (block_group / (512 / 32));
+        
+        block_read(lba_block + context->part_start, context->sysbuf);
+        
+        // copy the descriptor to the table
+        memcpy(&context->sysbuf[32 * (block_group % (512 / 32))],
+               bg,
+               sizeof(struct block_group_descriptor));
+    }
+    
+    return 0;
+}
+
+/**
+ * \brief Carries out an allocation/deallocation of a block.
+ * 
+ * This function will allocate or deallocate a block.  This includes updating the bitmap, the
+ * number of blocks used in the block group, the number of blocks used in the superblock.
+ * 
+ * \param context The ext2 filesystem context for the affected partition.
+ * \param block The block number to be allocated/deallocated
+ * \param allocated A boolean to indicate whether the block should be allocated or deallocated.
+ * Use values #EXT2_ALLOCATED or #EXT2_DEALLOCATED for this parameter.
+ * \param for_directory A boolean that states whether this block is for a directory or not (this
+ * is tracked in the block group descriptor so updating here saves a write to all the tables).
+ * \returns 0 on success -1 on failure.
+ **/
+int ext2_change_allocated(struct ext2context *context, 
+                          uint32_t block, 
+                          int allocated,
+                          int for_directory
+                         ) {
+    struct block_group_descriptor bg;
+    
+    // Step 1. change the bitmap in the appropriate block group
+    ext2_get_bg_descriptor(context, &bg, block / context->superblock.s_blocks_per_group);
+    
+    lba_block = bg.bg_block_bitmap;
+    
+    bitmap_offset = block % context->superblock.s_blocks_per_group;
+    
+    lba_block += (bitmap_offset / 8) / block_get_block_size();
+    
+    block_read(lba_block + context->part_start, context->sysbuf);
+    
+    if(context->sysbuf[(bitmap_offset / 8) % block_get_block_size()] & (1 << (bitmap_offset % 8))) {
+        if(allocated == EXT2_ALLOCATED) {
+            return -1;      // can't allocate an already allocated block
+        } else {
+            context->sysbuf[(bitmap_offset / 8) % block_get_block_size()] &= ~(1 << (bitmap_offset % 8));
+        }
+    } else {
+        if(allocated == EXT2_DEALLOCATED) {
+            return -1;      // can't deallocate an already free block
+        } else {
+            context->sysbuf[(bitmap_offset / 8) % block_get_block_size()] |= (1 << (bitmap_offset % 8));
+        }
+    }
+    
+    block_write(lba_block + context->part_start, context->sysbuf);
+    
+    // Step 2. update the block group descriptor
+    if(allocated == EXT2_ALLOCATED) {
+        bg.bg_free_blocks_count --;
+        if(for_directory) {
+            bg.bg_used_dirs_count ++;
+        }
+    } else {
+        bg.bg_free_blocks_count ++;
+        if(for_directory) {
+            bg.bg_used_dirs_count --;
+        }
+    }
+    
+    ext2_write_bg_descriptor(context, &bg, block / context->superblock.s_blocks_per_group);
+    
+    // Step 3. update the superblock
+    if(allocated == EXT2_ALLOCATED) {
+        context->superblock.s_free_blocks_count --;
+    } else {
+        context->superblock.s_free_blocks_count ++;
+    }
+    return 0;
+}
+
+uint32_t ext2_allocate_block(struct ext2context *context, uint32_t previous_block) {
+    int i;
+    struct block_group_descriptor bg;
+    // if there is a previous block specified and it wasn't the last block in its group
+    if(previous_block && ((previous_block + 1) % context->superblock.s_blocks_per_group)) {
+        ext2_get_bg_descriptor(context, &bg, previous_block / context->superblock.s_blocks_per_group);
+        
+        // don't bother reading the bitmap if the group is full
+        if(bg.bg_free_blocks_count > 0) {
+            // find the block number that stores the allocation bitmap
+            lba_block = bg.bg_block_bitmap;
+            
+            // convert the start of block to a disk location
+            lba_block <<= (context->superblock.s_log_block_size + 1);
+            
+            bitmap_offset = (previous_block + 1);
+            
+            // limit it to blocks within the current group
+            bitmap_offset %= context->superblock.s_blocks_per_group;
+            
+            lba_block += (bitmap_offset / 8) / block_get_block_size();
+            
+            block_read(lba_block + context->part_start, context->sysbuf);
+            
+            if(!(context->sysbuf[(bitmap_offset / 8) % block_get_block_size()] & (1 << (bitmap_offset % 8)))) {
+                // next block is free, allocate it
+                if(ext2_change_allocated(context, previous_block + 1, EXT2_ALLOCATED)) {
+                    return 0;
+                } else {
+                    return previous_block + 1;
+                }
+            }
+        }
+    }
+    // no previous block, or next block was already allocated start somewhere new
+    
+    return 0;
+}
+
 int ext2_update_atime(struct file_ent *fe) {
     fe->inode.i_atime = time(NULL);
     fe->flags |= EXT2_FLAG_FS_DIRTY;
@@ -326,7 +528,7 @@ int is_power(int x, int ofy) {
 
 int ext2_mount(blockno_t part_start, blockno_t volume_size, 
                uint8_t filesystem_hint, struct ext2context **context) {
-    int i;
+    int i, n;
     (*context) = (struct ext2context *)malloc(sizeof(struct ext2context));
     (*context)->part_start = part_start;
     block_read(part_start+2, (*context)->sysbuf);
@@ -346,17 +548,55 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
     }
   
     (*context)->read_only = block_get_device_read_only();
+    (*context)->num_blockgroups = ((*context)->superblock.s_blocks_count /
+                                   (*context)->superblock.s_blocks_per_group);
+    if((*context)->superblock.s_blocks_count % (*context)->superblock.s_blocks_per_group) {
+        (*context)->num_blockgroups++;
+    }
     
     if((*context)->sparse) {
-        printf("superblocks at:\n");
-        printf("  ");
-        for(i=0;i<(*context)->superblock.s_blocks_count / (*context)->superblock.s_blocks_per_group;i++) {
+        (*context)->num_superblocks = 0;
+        for(i=0;i<(*context)->num_blockgroups;i++) {
             if((i == 0) || (i == 1) || is_power(3, i) || is_power(5, i) || is_power(7, i)) {
-                printf("%d ", i);
+                (*context)->num_superblocks++;
             }
         }
-        printf("\n");
+        (*context)->superblock_blocks = (uint32_t *)malloc(sizeof(uint32_t) * (*context)->num_superblocks);
+        n = 0;
+        for(i=0;i<(*context)->num_blockgroups;i++) {
+            if((i == 0) || (i == 1) || is_power(3, i) || is_power(5, i) || is_power(7, i)) {
+                (*context)->superblock_blocks[n++] = i * (*context)->superblock.s_blocks_per_group + (*context)->superblock_block;
+            }
+        }
+    } else {
+        (*context)->num_superblocks = (*context)->num_blockgroups;
+        (*context)->superblock_blocks = (uint32_t *)malloc(sizeof(uint32_t) * (*context)->num_superblocks);
+        for(i=0;i<(*context)->num_superblocks;i++) {
+            (*context)->superblock_blocks[i] = i * (*context)->superblock.s_blocks_per_group + (*context)->superblock_block;
+        }
     }
+    
+    printf("Superblocks at\n  ");
+    for(i=0;i<(*context)->num_superblocks;i++) {
+        printf("%" PRIu32 " ", (*context)->superblock_blocks[i]);
+    }
+    printf("\n");
+
+    (*context)->superblock.s_mtime = time(NULL);
+    (*context)->superblock.s_mnt_count++;
+    
+    if((*context)->superblock.s_mnt_count > (*context)->superblock.s_max_mnt_count) {
+        printf("Should run e2fsck\n");
+    }
+    return 0;
+}
+
+int ext2_umount(struct ext2context *context) {
+    ext2_flush_superblock();
+    
+    free(context->superblock_blocks);
+    free(context);
+    
     return 0;
 }
 
