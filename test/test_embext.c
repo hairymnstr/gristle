@@ -77,6 +77,8 @@ int main(int argc, char *argv[]) {
   
   ext2_close(fe, &result);
   
+  ext2_print_bg1_bitmap(context);
+  
   block_pc_snapshot_all("writenfs.img");
   
   exit(0);

@@ -21,6 +21,10 @@
 
 #define EXT2_S_IFDIR 0x4000
 
+#define EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER 0x0001
+#define EXT2_FEATURE_RO_COMPAT_LARGE_FILE   0x0002
+#define EXT2_FEATURE_RO_COMPAT_BTREE_DIR    0x0004
+
 struct superblock {
   uint32_t s_inodes_count;
   uint32_t s_blocks_count;
@@ -105,6 +109,7 @@ struct inode {
 struct ext2context {
   blockno_t part_start;
   struct superblock superblock;
+  uint32_t sparse;
   uint8_t sysbuf[512];
   uint32_t superblock_block;
   uint32_t read_only;

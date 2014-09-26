@@ -76,6 +76,66 @@ void ext2_print_inode(struct inode *in) {
     }
     printf("\"\n");
 }
+
+void ext2_print_bg1_bitmap(struct ext2context *context) {
+    uint32_t block_group_count = context->superblock.s_blocks_count / context->superblock.s_blocks_per_group;
+    if(context->superblock.s_blocks_count % context->superblock.s_blocks_per_group) {
+        block_group_count ++;
+    }
+    printf("block group count = %d\n", block_group_count);
+    
+    uint32_t bg_block = context->superblock_block + 1;
+    
+    bg_block <<= (context->superblock.s_log_block_size + 1);
+    bg_block += ((0 * 32) / block_get_block_size());
+    
+    block_read(bg_block + context->part_start, context->sysbuf);
+    
+    struct block_group_descriptor *block_table = (struct block_group_descriptor *)&context->sysbuf[0];
+    
+    printf("bg_block_bitmap = %" PRIu32 "\n", block_table->bg_block_bitmap);
+    printf("bg_inode_bitmap = %" PRIu32 "\n", block_table->bg_inode_bitmap);
+    printf("bg_inode_table = %" PRIu32 "\n", block_table->bg_inode_table);
+    printf("bg_free_blocks_count = %" PRIu16 " (of %" PRIu32 ")\n", 
+           block_table->bg_free_blocks_count,
+           context->superblock.s_blocks_per_group);
+    printf("bg_free_inodes_count = %" PRIu16 "\n", block_table->bg_free_inodes_count);
+    printf("bg_used_dirs_count = %" PRIu16 "\n", block_table->bg_used_dirs_count);
+    
+    int i, j, k;
+    uint32_t bmp_read = 0, bmp_block, nused=0;
+    
+    bmp_block = block_table->bg_block_bitmap;
+    bmp_block <<= (context->superblock.s_log_block_size + 1);
+    bmp_block += context->part_start;
+    
+    while(bmp_read < (1024 << context->superblock.s_log_block_size)) {
+        block_read(bmp_block, context->sysbuf);
+        
+        for(j=0;j<16;j++) {
+            for(i=0;i<32;i++) {
+                printf("%02x", context->sysbuf[j*32+i]);
+                if(context->sysbuf[j*32+i]) {
+                    for(k=1;k<0x100;k<<=1) {
+                        if(context->sysbuf[j*32+i] & k) {
+                            nused++;
+                        }
+                    }
+                }
+            }
+            printf("\n");
+        }
+        
+        bmp_read += 512;
+        bmp_block ++;
+    }
+    
+    printf("\nTotal bitmap entries = %d, used = %d, free = %d\n", 
+           bmp_read * 8,
+           nused,
+           bmp_read * 8 - nused
+          );
+}
 #endif
 
 int ext2_flush(struct file_ent *fe) {
@@ -257,8 +317,16 @@ int ext2_next_sector(struct file_ent *fe) {
  * callable file access routines
  */
 
+int is_power(int x, int ofy) {
+    while((x % ofy ) == 0) {
+        x /= ofy;
+    }
+    return x == 1;
+}
+
 int ext2_mount(blockno_t part_start, blockno_t volume_size, 
                uint8_t filesystem_hint, struct ext2context **context) {
+    int i;
   (*context) = (struct ext2context *)malloc(sizeof(struct ext2context));
   (*context)->part_start = part_start;
   block_read(part_start+2, (*context)->sysbuf);
@@ -275,8 +343,26 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
     (*context)->superblock_block = 0;
   }
   
+  if(((*context)->superblock.s_rev_level == 1) && 
+     ((*context)->superblock.s_feature_ro_compat & EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER)) {
+      (*context)->sparse = 1;
+  } else {
+      (*context)->sparse = 0;
+  }
+  
+  
   (*context)->read_only = block_get_device_read_only();
     
+  if((*context)->sparse) {
+      printf("superblocks at:\n");
+      printf("  ");
+      for(i=0;i<(*context)->superblock.s_blocks_count / (*context)->superblock.s_blocks_per_group;i++) {
+          if((i == 0) || (i == 1) || is_power(3, i) || is_power(5, i) || is_power(7, i)) {
+            printf("%d ", i);
+          }
+      }
+      printf("\n");
+  }
 //   printf("s_inodes_count %u\n", (*context)->superblock.s_inodes_count);
 //   printf("s_blocks_count %u\n", (*context)->superblock.s_blocks_count);
 //   printf("s_r_blocks_count %u\n", (*context)->superblock.s_r_blocks_count);
