@@ -43,6 +43,14 @@
 #define GRISTLE_TIME time(NULL)
 #endif
 
+#ifndef GRISTLE_SYSLOCK
+#define GRISTLE_SYSLOCK 1
+#endif
+
+#ifndef GRISTLE_SYSUNLOCK
+#define GRISTLE_SYSUNLOCK
+#endif
+
 /**
  * global variable structures.
  * These take the place of a real operating system.
@@ -376,38 +384,44 @@ int fat_get_free_cluster() {
   blockno_t i;
   int j;
   uint32_t e;
-  for(i=fatfs.active_fat_start;i<fatfs.active_fat_start + fatfs.sectors_per_fat;i++) {
-    if(block_read(i, fatfs.sysbuf)) {
-      return 0xFFFFFFFF;
-    }
-    for(j=0;j<(512/fatfs.fat_entry_len);j++) {
-      e = fatfs.sysbuf[j*fatfs.fat_entry_len];
-      e += fatfs.sysbuf[j*fatfs.fat_entry_len+1] << 8;
-      if(fatfs.type == PART_TYPE_FAT32) {
-        e += fatfs.sysbuf[j*fatfs.fat_entry_len+2] << 16;
-        e += fatfs.sysbuf[j*fatfs.fat_entry_len+3] << 24;
+  
+  if(GRISTLE_SYSLOCK) {
+    for(i=fatfs.active_fat_start;i<fatfs.active_fat_start + fatfs.sectors_per_fat;i++) {
+      if(block_read(i, fatfs.sysbuf)) {
+        return 0xFFFFFFFF;
       }
-      if(e == 0) {
-        /* this is a free cluster */
-        /* first, mark it as the end of the chain */
-        if(fatfs.type == PART_TYPE_FAT16) {
-          fatfs.sysbuf[j*fatfs.fat_entry_len] = 0xF8;
-          fatfs.sysbuf[j*fatfs.fat_entry_len+1] = 0xFF;
-        } else {
-          fatfs.sysbuf[j*fatfs.fat_entry_len] = 0xF8;
-          fatfs.sysbuf[j*fatfs.fat_entry_len+1] = 0xFF;
-          fatfs.sysbuf[j*fatfs.fat_entry_len+2] = 0xFF;
-          fatfs.sysbuf[j*fatfs.fat_entry_len+3] = 0x0F;
+      for(j=0;j<(512/fatfs.fat_entry_len);j++) {
+        e = fatfs.sysbuf[j*fatfs.fat_entry_len];
+        e += fatfs.sysbuf[j*fatfs.fat_entry_len+1] << 8;
+        if(fatfs.type == PART_TYPE_FAT32) {
+          e += fatfs.sysbuf[j*fatfs.fat_entry_len+2] << 16;
+          e += fatfs.sysbuf[j*fatfs.fat_entry_len+3] << 24;
         }
-        if(block_write(i, fatfs.sysbuf)) {
-          return 0xFFFFFFFF;
+        if(e == 0) {
+          /* this is a free cluster */
+          /* first, mark it as the end of the chain */
+          if(fatfs.type == PART_TYPE_FAT16) {
+            fatfs.sysbuf[j*fatfs.fat_entry_len] = 0xF8;
+            fatfs.sysbuf[j*fatfs.fat_entry_len+1] = 0xFF;
+          } else {
+            fatfs.sysbuf[j*fatfs.fat_entry_len] = 0xF8;
+            fatfs.sysbuf[j*fatfs.fat_entry_len+1] = 0xFF;
+            fatfs.sysbuf[j*fatfs.fat_entry_len+2] = 0xFF;
+            fatfs.sysbuf[j*fatfs.fat_entry_len+3] = 0x0F;
+          }
+          if(block_write(i, fatfs.sysbuf)) {
+            GRISTLE_SYSUNLOCK;
+            return 0xFFFFFFFF;
+          }
+  #ifdef TRACE
+    printf("fat_get_free_cluster returning %d\n", ((i - fatfs.active_fat_start) * (512 / fatfs.fat_entry_len)) + j);
+  #endif
+          GRISTLE_SYSUNLOCK;
+          return ((i - fatfs.active_fat_start) * (512 / fatfs.fat_entry_len)) + j;
         }
-#ifdef TRACE
-  printf("fat_get_free_cluster returning %d\n", ((i - fatfs.active_fat_start) * (512 / fatfs.fat_entry_len)) + j);
-#endif
-        return ((i - fatfs.active_fat_start) * (512 / fatfs.fat_entry_len)) + j;
       }
     }
+    GRISTLE_SYSUNLOCK;
   }
   return 0;     /* no clusters found, should raise ENOSPC */
 }
@@ -421,34 +435,40 @@ int fat_free_clusters(uint32_t cluster) {
   uint32_t j;
   blockno_t current_block = MAX_BLOCK;
   
-  while(1) {
-    if(fatfs.active_fat_start + ((cluster * fatfs.fat_entry_len) / 512) != current_block) {
-      if(current_block != MAX_BLOCK) {
-        block_write(current_block, fatfs.sysbuf);
+  if(GRISTLE_SYSLOCK) {
+    while(1) {
+      if(fatfs.active_fat_start + ((cluster * fatfs.fat_entry_len) / 512) != current_block) {
+        if(current_block != MAX_BLOCK) {
+          block_write(current_block, fatfs.sysbuf);
+        }
+        if(block_read(fatfs.active_fat_start + ((cluster * fatfs.fat_entry_len) / 512), fatfs.sysbuf)) {
+          GRISTLE_SYSUNLOCK;
+          return -1;
+        }
+        current_block = fatfs.active_fat_start + ((cluster * fatfs.fat_entry_len)/512);
       }
-      if(block_read(fatfs.active_fat_start + ((cluster * fatfs.fat_entry_len) / 512), fatfs.sysbuf)) {
-        return -1;
+      estart = (cluster * fatfs.fat_entry_len) & 0x1ff;
+      j = fatfs.sysbuf[estart];
+      fatfs.sysbuf[estart] = 0;
+      j += fatfs.sysbuf[estart + 1] << 8;
+      fatfs.sysbuf[estart+1] = 0;
+      if(fatfs.type == PART_TYPE_FAT32) {
+        j += fatfs.sysbuf[estart + 2] << 16;
+        fatfs.sysbuf[estart+2] = 0;
+        j += fatfs.sysbuf[estart + 3] << 24;
+        fatfs.sysbuf[estart+3] = 0;
       }
-      current_block = fatfs.active_fat_start + ((cluster * fatfs.fat_entry_len)/512);
+      cluster = j;
+      if(cluster >= fatfs.end_cluster_marker) {
+        break;
+      }
     }
-    estart = (cluster * fatfs.fat_entry_len) & 0x1ff;
-    j = fatfs.sysbuf[estart];
-    fatfs.sysbuf[estart] = 0;
-    j += fatfs.sysbuf[estart + 1] << 8;
-    fatfs.sysbuf[estart+1] = 0;
-    if(fatfs.type == PART_TYPE_FAT32) {
-      j += fatfs.sysbuf[estart + 2] << 16;
-      fatfs.sysbuf[estart+2] = 0;
-      j += fatfs.sysbuf[estart + 3] << 24;
-      fatfs.sysbuf[estart+3] = 0;
-    }
-    cluster = j;
-    if(cluster >= fatfs.end_cluster_marker) {
-      break;
-    }
+    block_write(current_block, fatfs.sysbuf);
+  } else {
+    // failed to get mutex
+    return -1;
   }
-  block_write(current_block, fatfs.sysbuf);
-  
+  GRISTLE_SYSUNLOCK;
   return 0;
 }
 
@@ -933,120 +953,134 @@ int fat_mount_fat16(blockno_t start, blockno_t volume_size) {
   blockno_t i;
   boot_sector_fat16 *boot16;
   
-  fatfs.read_only = block_get_device_read_only();
-  block_read(start, fatfs.sysbuf);
-  
-  boot16 = (boot_sector_fat16 *)fatfs.sysbuf;
-  // now validate all fields and reject the block device if anything fails
-  
-  // could check the volume name is all printable characters
-  
-  // we can only handle sector size equal to the disk block size
-  // for now at least.
-  if(!(boot16->sector_size == 512)) {
+  if(GRISTLE_SYSLOCK) {
+    fatfs.read_only = block_get_device_read_only();
+    block_read(start, fatfs.sysbuf);
+    
+    boot16 = (boot_sector_fat16 *)fatfs.sysbuf;
+    // now validate all fields and reject the block device if anything fails
+    
+    // could check the volume name is all printable characters
+    
+    // we can only handle sector size equal to the disk block size
+    // for now at least.
+    if(!(boot16->sector_size == 512)) {
 #ifdef FAT_DEBUG
-    printf("Sector size not 512 bytes.\r\n");
+      printf("Sector size not 512 bytes.\r\n");
 #endif
-    return -1;
-  }
-  
-  // cluster size is a number of sectors per cluster.  Must be a
-  // power of two in 8 bits (i.e. 1, 2, 4, 8, 16, 32, 64 or 128)
-  for(i=0;i<8;i++) {
-    if(boot16->cluster_size == (1 << i)) {
-      break;
-    }
-  }
-  if(i == 8) {
-#ifdef FAT_DEBUG
-    printf("Cluster size not power of two.\r\n");
-#endif
-    return -1;
-  }
-  
-  // number of reserved sectors must be at least 1, can't be
-  // the size of the partition.
-  if((boot16->reserved_sectors < 1) || (boot16->reserved_sectors >= volume_size)) {
-#ifdef FAT_DEBUG
-    printf("Reserved sector count was not valid: %d\r\n", boot16->reserved_sectors);
-#endif
-    return -1;
-  }
-  
-  // number of fats, normally two but must be between 1 and 15
-  if((boot16->num_fats < 1) || (boot16->num_fats >= 15)) {
-#ifdef FAT_DEBUG
-    printf("Invalid number of FATs: %d\r\n", boot16->num_fats);
-#endif
-    return -1;
-  }
-  
-  // number of root directory entries
-  if((boot16->root_entries == 0)) {
-#ifdef FAT_DEBUG
-    printf("No root directory entries, looks like a FAT32 partition.\r\n");
-#endif
-    return -1;
-  }
-  
-  // number of root directory entries must be an integer multiple of the sector size
-  if((boot16->root_entries) & ((boot16->sector_size / 32) - 1)) {
-#ifdef FAT_DEBUG
-    printf("Root directory will not be an integer number of sectors.\r\n");
-#endif
-    return -1;
-  }
-  
-  // total logical sectors (if less than 65535)
-  if(boot16->total_sectors == 0) {
-    if(boot16->big_total_sectors > volume_size) {
-#ifdef FAT_DEBUG
-      printf("Total sectors is larger than the volume.\r\n");
-#endif
+      GRISTLE_SYSUNLOCK;
       return -1;
     }
-  } else {
-    if(boot16->total_sectors > volume_size) {
+    
+    // cluster size is a number of sectors per cluster.  Must be a
+    // power of two in 8 bits (i.e. 1, 2, 4, 8, 16, 32, 64 or 128)
+    for(i=0;i<8;i++) {
+      if(boot16->cluster_size == (1 << i)) {
+        break;
+      }
+    }
+    if(i == 8) {
 #ifdef FAT_DEBUG
-      printf("Total sectors is larger than the volume.\r\n");
+      printf("Cluster size not power of two.\r\n");
 #endif
+      GRISTLE_SYSUNLOCK;
       return -1;
     }
-  }
-  
-  fatfs.sectors_per_cluster = boot16->cluster_size;
-  fatfs.root_len = (boot16->root_entries * 32) / 512;
-  i = start;
-  i += boot16->reserved_sectors;
-  fatfs.active_fat_start = i;
-  fatfs.sectors_per_fat = boot16->sectors_per_fat;
-  i += (boot16->sectors_per_fat * boot16->num_fats);
-  fatfs.root_start = i;
-  i += (boot16->root_entries * 32) / 512;
-  i -= (boot16->cluster_size * 2);
-  fatfs.cluster0 = i;
-  
-  // check the calculated values are within the volume 
-  if(fatfs.root_start > (start + volume_size)) {
+    
+    // number of reserved sectors must be at least 1, can't be
+    // the size of the partition.
+    if((boot16->reserved_sectors < 1) || (boot16->reserved_sectors >= volume_size)) {
 #ifdef FAT_DEBUG
-    printf("Root start is beyond the end of the volume.\r\n");
+      printf("Reserved sector count was not valid: %d\r\n", boot16->reserved_sectors);
 #endif
+      GRISTLE_SYSUNLOCK;
+      return -1;
+    }
+    
+    // number of fats, normally two but must be between 1 and 15
+    if((boot16->num_fats < 1) || (boot16->num_fats >= 15)) {
+#ifdef FAT_DEBUG
+      printf("Invalid number of FATs: %d\r\n", boot16->num_fats);
+#endif
+      GRISTLE_SYSUNLOCK;
+      return -1;
+    }
+    
+    // number of root directory entries
+    if((boot16->root_entries == 0)) {
+#ifdef FAT_DEBUG
+      printf("No root directory entries, looks like a FAT32 partition.\r\n");
+#endif
+      GRISTLE_SYSUNLOCK;
+      return -1;
+    }
+    
+    // number of root directory entries must be an integer multiple of the sector size
+    if((boot16->root_entries) & ((boot16->sector_size / 32) - 1)) {
+#ifdef FAT_DEBUG
+      printf("Root directory will not be an integer number of sectors.\r\n");
+#endif
+      GRISTLE_SYSUNLOCK;
+      return -1;
+    }
+    
+    // total logical sectors (if less than 65535)
+    if(boot16->total_sectors == 0) {
+      if(boot16->big_total_sectors > volume_size) {
+#ifdef FAT_DEBUG
+        printf("Total sectors is larger than the volume.\r\n");
+#endif
+        GRISTLE_SYSUNLOCK;
+        return -1;
+      }
+    } else {
+      if(boot16->total_sectors > volume_size) {
+#ifdef FAT_DEBUG
+        printf("Total sectors is larger than the volume.\r\n");
+#endif
+        GRISTLE_SYSUNLOCK;
+        return -1;
+      }
+    }
+    
+    fatfs.sectors_per_cluster = boot16->cluster_size;
+    fatfs.root_len = (boot16->root_entries * 32) / 512;
+    i = start;
+    i += boot16->reserved_sectors;
+    fatfs.active_fat_start = i;
+    fatfs.sectors_per_fat = boot16->sectors_per_fat;
+    i += (boot16->sectors_per_fat * boot16->num_fats);
+    fatfs.root_start = i;
+    i += (boot16->root_entries * 32) / 512;
+    i -= (boot16->cluster_size * 2);
+    fatfs.cluster0 = i;
+    
+    // check the calculated values are within the volume 
+    if(fatfs.root_start > (start + volume_size)) {
+#ifdef FAT_DEBUG
+      printf("Root start is beyond the end of the volume.\r\n");
+#endif
+      GRISTLE_SYSUNLOCK;
+      return -1;
+    }
+    
+    if(boot16->total_sectors == 0) {
+      fatfs.total_sectors = boot16->big_total_sectors;
+    } else {
+      fatfs.total_sectors = boot16->total_sectors;
+    }
+    
+    // validated a FAT16 volume boot record, setup the FAT16 abstraction values
+    fatfs.type = PART_TYPE_FAT16;
+    fatfs.fat_entry_len = 2;
+    fatfs.end_cluster_marker = 0xFFF0;
+    fatfs.part_start = start;
+    fatfs.root_cluster = 1;
+
+  } else {
     return -1;
   }
-  
-  if(boot16->total_sectors == 0) {
-    fatfs.total_sectors = boot16->big_total_sectors;
-  } else {
-    fatfs.total_sectors = boot16->total_sectors;
-  }
-  
-  // validated a FAT16 volume boot record, setup the FAT16 abstraction values
-  fatfs.type = PART_TYPE_FAT16;
-  fatfs.fat_entry_len = 2;
-  fatfs.end_cluster_marker = 0xFFF0;
-  fatfs.part_start = start;
-  fatfs.root_cluster = 1;
-  
+  GRISTLE_SYSUNLOCK;
   return 0;
 }
 
@@ -1054,110 +1088,124 @@ int fat_mount_fat32(blockno_t start, blockno_t volume_size) {
   blockno_t i;
   boot_sector_fat32 *boot32;
   
-  fatfs.read_only = block_get_device_read_only();
-  block_read(start, fatfs.sysbuf);
-  
-  boot32 = (boot_sector_fat32 *)fatfs.sysbuf;
-  // now validate all fields and reject the block device if anything fails
-  
-  // could check the volume name is all printable characters
-  
-  // we can only handle sector size equal to the disk block size
-  // for now at least.
-  if(!(boot32->sector_size == 512)) {
-#ifdef FAT_DEBUG
-    printf("Sector size not 512 bytes.\r\n");
-#endif
-    return -1;
-  }
-  
-  // cluster size is a number of sectors per cluster.  Must be a
-  // power of two in 8 bits (i.e. 1, 2, 4, 8, 16, 32, 64 or 128)
-  for(i=0;i<8;i++) {
-    if(boot32->cluster_size == (1 << i)) {
-      break;
-    }
-  }
-  if(i == 8) {
-#ifdef FAT_DEBUG
-    printf("Cluster size not power of two.\r\n");
-#endif
-    return -1;
-  }
-  
-  // number of reserved sectors must be at least 1, can't be
-  // the size of the partition.
-  if((boot32->reserved_sectors < 1) || (boot32->reserved_sectors >= volume_size)) {
-#ifdef FAT_DEBUG
-    printf("Reserved sector count was not valid: %d\r\n", boot32->reserved_sectors);
-#endif
-    return -1;
-  }
-  
-  // number of fats, normally two but must be between 1 and 15
-  if((boot32->num_fats < 1) || (boot32->num_fats >= 15)) {
-#ifdef FAT_DEBUG
-    printf("Invalid number of FATs: %d\r\n", boot32->num_fats);
-#endif
-    return -1;
-  }
-  
-  // number of root directory entries
-  if((boot32->root_entries != 0)) {
-#ifdef FAT_DEBUG
-    printf("Root directory entries, looks like a FAT16 partition.\r\n");
-#endif
-    return -1;
-  }
-  
-  // number of root directory entries must be an integer multiple of the sector size
-  if((boot32->root_entries) & ((boot32->sector_size / 32) - 1)) {
-#ifdef FAT_DEBUG
-    printf("Root directory will not be an integer number of sectors.\r\n");
-#endif
-    return -1;
-  }
-  
-  // total logical sectors (if less than 65535)
-  if(boot32->total_sectors == 0) {
-    if(boot32->big_total_sectors > volume_size) {
-#ifdef FAT_DEBUG
-      printf("Total sectors is larger than the volume.\r\n");
-#endif
+  if(GRISTLE_SYSLOCK) {
+    
+    fatfs.read_only = block_get_device_read_only();
+    block_read(start, fatfs.sysbuf);
+    
+    boot32 = (boot_sector_fat32 *)fatfs.sysbuf;
+    // now validate all fields and reject the block device if anything fails
+    
+    // could check the volume name is all printable characters
+    
+    // we can only handle sector size equal to the disk block size
+    // for now at least.
+    if(!(boot32->sector_size == 512)) {
+  #ifdef FAT_DEBUG
+      printf("Sector size not 512 bytes.\r\n");
+  #endif
+      GRISTLE_SYSUNLOCK;
       return -1;
     }
-  } else {
-    if(boot32->total_sectors > volume_size) {
-#ifdef FAT_DEBUG
-      printf("Total sectors is larger than the volume.\r\n");
-#endif
+    
+    // cluster size is a number of sectors per cluster.  Must be a
+    // power of two in 8 bits (i.e. 1, 2, 4, 8, 16, 32, 64 or 128)
+    for(i=0;i<8;i++) {
+      if(boot32->cluster_size == (1 << i)) {
+        break;
+      }
+    }
+    if(i == 8) {
+  #ifdef FAT_DEBUG
+      printf("Cluster size not power of two.\r\n");
+  #endif
+      GRISTLE_SYSUNLOCK;
       return -1;
     }
-  }
-  
-  boot32 = (boot_sector_fat32 *)fatfs.sysbuf;
-  fatfs.sectors_per_cluster = boot32->cluster_size;
-  i = start;
-  i += boot32->reserved_sectors;
-  fatfs.active_fat_start = i;
-  fatfs.sectors_per_fat = boot32->sectors_per_fat;
-  i += boot32->sectors_per_fat * boot32->num_fats;
-  i -= boot32->cluster_size * 2;
-  fatfs.cluster0 = i;
-  fatfs.root_cluster = boot32->root_start;
+    
+    // number of reserved sectors must be at least 1, can't be
+    // the size of the partition.
+    if((boot32->reserved_sectors < 1) || (boot32->reserved_sectors >= volume_size)) {
+  #ifdef FAT_DEBUG
+      printf("Reserved sector count was not valid: %d\r\n", boot32->reserved_sectors);
+  #endif
+      GRISTLE_SYSUNLOCK;
+      return -1;
+    }
+    
+    // number of fats, normally two but must be between 1 and 15
+    if((boot32->num_fats < 1) || (boot32->num_fats >= 15)) {
+  #ifdef FAT_DEBUG
+      printf("Invalid number of FATs: %d\r\n", boot32->num_fats);
+  #endif
+      GRISTLE_SYSUNLOCK;
+      return -1;
+    }
+    
+    // number of root directory entries
+    if((boot32->root_entries != 0)) {
+  #ifdef FAT_DEBUG
+      printf("Root directory entries, looks like a FAT16 partition.\r\n");
+  #endif
+      GRISTLE_SYSUNLOCK;
+      return -1;
+    }
+    
+    // number of root directory entries must be an integer multiple of the sector size
+    if((boot32->root_entries) & ((boot32->sector_size / 32) - 1)) {
+  #ifdef FAT_DEBUG
+      printf("Root directory will not be an integer number of sectors.\r\n");
+  #endif
+      GRISTLE_SYSUNLOCK;
+      return -1;
+    }
+    
+    // total logical sectors (if less than 65535)
+    if(boot32->total_sectors == 0) {
+      if(boot32->big_total_sectors > volume_size) {
+  #ifdef FAT_DEBUG
+        printf("Total sectors is larger than the volume.\r\n");
+  #endif
+        GRISTLE_SYSUNLOCK;
+        return -1;
+      }
+    } else {
+      if(boot32->total_sectors > volume_size) {
+  #ifdef FAT_DEBUG
+        printf("Total sectors is larger than the volume.\r\n");
+  #endif
+        GRISTLE_SYSUNLOCK;
+        return -1;
+      }
+    }
+    
+    boot32 = (boot_sector_fat32 *)fatfs.sysbuf;
+    fatfs.sectors_per_cluster = boot32->cluster_size;
+    i = start;
+    i += boot32->reserved_sectors;
+    fatfs.active_fat_start = i;
+    fatfs.sectors_per_fat = boot32->sectors_per_fat;
+    i += boot32->sectors_per_fat * boot32->num_fats;
+    i -= boot32->cluster_size * 2;
+    fatfs.cluster0 = i;
+    fatfs.root_cluster = boot32->root_start;
 
-  if(boot32->total_sectors == 0) {
-    fatfs.total_sectors = boot32->big_total_sectors;
+    if(boot32->total_sectors == 0) {
+      fatfs.total_sectors = boot32->big_total_sectors;
+    } else {
+      fatfs.total_sectors = boot32->total_sectors;
+    }
+    
+    // validated a FAT32 volume boot record, setup the FAT32 abstraction values
+    fatfs.type = PART_TYPE_FAT32;
+    fatfs.fat_entry_len = 4;
+    fatfs.end_cluster_marker = 0xFFFFFF0;
+    fatfs.part_start = start;
   } else {
-    fatfs.total_sectors = boot32->total_sectors;
+    // failed to get mutex
+    return -1;
   }
-  
-  // validated a FAT32 volume boot record, setup the FAT32 abstraction values
-  fatfs.type = PART_TYPE_FAT32;
-  fatfs.fat_entry_len = 4;
-  fatfs.end_cluster_marker = 0xFFFFFF0;
-  fatfs.part_start = start;
-  
+  GRISTLE_SYSUNLOCK;
   return 0;
 }
 
