@@ -614,6 +614,9 @@ int fat_next_cluster(int fd, int *rerrno) {
         (*rerrno) = EIO;
         return -1;
       }
+      /* periodically update the directory entry so that the file size gets flushed
+       * when more clusters are added to the file */
+      fat_flush_fileinfo(fd);
       j = k;
     } else {
       /* end of the file cluster chain reached */
@@ -1456,17 +1459,16 @@ int fat_write(int fd, const void *buffer, size_t count, int *rerrno) {
     fat_lseek(fd, 0, SEEK_END, rerrno);
   }
   while(i < count) {
-//     printf("Written %d bytes\n", i);
-    if(!(file_num[fd].attributes & FAT_ATT_SUBDIR)) {
-      if(((file_num[fd].cursor + file_num[fd].file_sector * 512)) == file_num[fd].size) {
-        file_num[fd].size++;
-        file_num[fd].flags |= FAT_FLAG_FS_DIRTY;
-      }
-    }
     if(file_num[fd].cursor == 512) {
       if(fat_next_sector(fd)) {
         (*rerrno) = EIO;
         return -1;
+      }
+    }
+    if(!(file_num[fd].attributes & FAT_ATT_SUBDIR)) {
+      if(((file_num[fd].cursor + file_num[fd].file_sector * 512)) == file_num[fd].size) {
+        file_num[fd].size++;
+        file_num[fd].flags |= FAT_FLAG_FS_DIRTY;
       }
     }
     file_num[fd].buffer[file_num[fd].cursor] = *bt++;
