@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
   ext2_close(fe, &result);
   
   FILE *fw = fopen("dump.png", "wb");
-  fe = ext2_open(context, "/static/Chronos_white_logo.png", O_RDONLY, 0777, &result);
+  fe = ext2_open(context, "/static/test_image.png", O_RDONLY, 0777, &result);
   printf("%p\n", fe);
   printf("fe->inode_number = %d\n", fe->inode_number);
   while((p = ext2_read(fe, &buffer, sizeof(buffer), &result)) == sizeof(buffer)) {
@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
   
   printf("\nWrite test...\n\n");
   
-  fe = ext2_open(context, "/test.txt", O_WRONLY | O_APPEND, 0777, &result);
+  fe = ext2_open(context, "/logs/test.txt", O_WRONLY | O_APPEND, 0777, &result);
   if(fe == NULL) {
       printf("Open for writing failed, errno=%d (%s)\r\n", result, strerror(result));
       exit(-1);

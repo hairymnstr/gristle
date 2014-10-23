@@ -25,6 +25,8 @@
 #define EXT2_FEATURE_RO_COMPAT_LARGE_FILE   0x0002
 #define EXT2_FEATURE_RO_COMPAT_BTREE_DIR    0x0004
 
+#define EXT2_ALLOCATED          1
+#define EXT2_DEALLOCATED        0
 struct superblock {
     uint32_t s_inodes_count;
     uint32_t s_blocks_count;

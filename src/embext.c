@@ -218,6 +218,7 @@ int ext2_flush_superblock(struct ext2context *context) {
 int ext2_get_bg_descriptor(struct ext2context *context, 
                            struct block_group_descriptor *bg, 
                            uint32_t block_group) {
+    uint32_t lba_block;
     if(block_group >= context->num_blockgroups) {
         return -1;
     }
@@ -257,6 +258,8 @@ int ext2_get_bg_descriptor(struct ext2context *context,
 int ext2_write_bg_descriptor(struct ext2context *context,
                              struct block_group_descriptor *bg,
                              uint32_t block_group) {
+    int i;
+    uint32_t lba_block;
     if(block_group >= context->num_blockgroups) {
         return -1;
     }
@@ -301,6 +304,8 @@ int ext2_change_allocated(struct ext2context *context,
                           int allocated,
                           int for_directory
                          ) {
+    uint32_t lba_block;
+    uint32_t bitmap_offset;
     struct block_group_descriptor bg;
     
     // Step 1. change the bitmap in the appropriate block group
@@ -354,9 +359,12 @@ int ext2_change_allocated(struct ext2context *context,
     return 0;
 }
 
-uint32_t ext2_allocate_block(struct ext2context *context, uint32_t previous_block) {
+uint32_t ext2_allocate_block(struct ext2context *context, uint32_t previous_block, int for_directory) {
     int i;
+    uint32_t lba_block;
+    uint32_t bitmap_offset;
     struct block_group_descriptor bg;
+    
     // if there is a previous block specified and it wasn't the last block in its group
     if(previous_block && ((previous_block + 1) % context->superblock.s_blocks_per_group)) {
         ext2_get_bg_descriptor(context, &bg, previous_block / context->superblock.s_blocks_per_group);
@@ -380,7 +388,7 @@ uint32_t ext2_allocate_block(struct ext2context *context, uint32_t previous_bloc
             
             if(!(context->sysbuf[(bitmap_offset / 8) % block_get_block_size()] & (1 << (bitmap_offset % 8)))) {
                 // next block is free, allocate it
-                if(ext2_change_allocated(context, previous_block + 1, EXT2_ALLOCATED)) {
+                if(ext2_change_allocated(context, previous_block + 1, EXT2_ALLOCATED, for_directory)) {
                     return 0;
                 } else {
                     return previous_block + 1;
@@ -592,7 +600,7 @@ int ext2_mount(blockno_t part_start, blockno_t volume_size,
 }
 
 int ext2_umount(struct ext2context *context) {
-    ext2_flush_superblock();
+    ext2_flush_superblock(context);
     
     free(context->superblock_blocks);
     free(context);
