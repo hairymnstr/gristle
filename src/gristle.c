@@ -319,19 +319,22 @@ int fatname_to_str(char *output, char *input) {
 int str_to_fatname(char *url, char *dosname) {
   int i = 0;
   int j = 0;
-  char *name;
-  char *extension;
-  char buffer[32];
-  strncpy(buffer, url, 32);
-  buffer[31] = 0;
+  unsigned int name_len = strlen(url);
+  char *extension = "";
   
-  name = strtok(buffer, ".");
-  extension = strtok(NULL, ".");
-  if(extension == NULL) {
-    extension = "";     // probably a directory
+  if(url[strlen(url)-1] == '.') {
+    name_len = strlen(url)-1;
+  } else {
+    for(i=strlen(url)-2;i>0;i--) {
+      if(url[i] == '.') {
+        name_len = i;
+        extension = &url[i+1];
+        break;
+      }
+    }
   }
-  
-  if((strlen(name) > 8) || (strlen(extension) > 3)) {
+  i = 0;
+  if((name_len > 8) || (strlen(extension) > 3)) {
     while(i < 6) {
       dosname[i] = doschar(url[j++]);
       if(dosname[i] == 1) {
