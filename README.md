@@ -23,7 +23,7 @@ The library is designed to be called from a UNIX style C library for example
 [newlib](http://www.sourceware.org/newlib/) where there are POSIX compliant ``_open()`` and 
 ``_write()`` calls etc.  The binding between Gristle and the C library can be seen in a typical
 ``syscalls.c`` file in the 
-[oggbox project](https://github.com/hairymnstr/tree/master/src/syscalls.c).
+[oggbox project](https://github.com/hairymnstr/oggbox/blob/master/firmware/src/syscalls.c).
 
 There is also a handler for MBR type primary partition tables in ``partition.c`` which can be used
 in an embedded system to identify partitions within a volume.
